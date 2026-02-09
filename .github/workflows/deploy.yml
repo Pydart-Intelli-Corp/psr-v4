@@ -1,0 +1,231 @@
+name: Optimized FTP Deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    
+    steps:
+      - name: 📦 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '21.x'
+          cache: 'npm'
+
+      - name: 📥 Install Dependencies (Production Only)
+        run: |
+          echo "📥 Installing production dependencies..."
+          npm ci --prefer-offline --omit=dev --no-audit --no-fund
+          echo "✅ Dependencies installed"
+
+      - name: 🔨 Build Application
+        run: npm run build
+        env:
+          NODE_ENV: production
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: 📦 Create Deployment Package
+        run: |
+          echo "🎯 Creating deployment package (without node_modules)..."
+          mkdir -p deploy
+          
+          # Copy ONLY built files and config (NO node_modules)
+          cp -r .next deploy/
+          cp -r public deploy/
+          cp -r database deploy/
+          cp -r config deploy/
+          cp package.json package-lock.json deploy/
+          cp next.config.ts instrumentation.ts ecosystem.config.js pulse-scheduler.js deploy/
+          cp postcss.config.mjs tailwind.config.js deploy/ 2>/dev/null || true
+          
+          echo "📦 Compressing..."
+          tar -czf deploy.tar.gz -C deploy .
+          
+          PACKAGE_SIZE=$(du -h deploy.tar.gz | cut -f1)
+          echo "✅ Package created: $PACKAGE_SIZE"
+
+      - name: 📤 Upload via FTP
+        run: |
+          echo "📤 Uploading complete package to FTP..."
+          curl -T deploy.tar.gz ftp://${{ secrets.VPS_HOST }}/psr-cloud-v4/ \
+            --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}" \
+            --ftp-create-dirs -v
+          echo "✅ Upload complete"
+
+      - name: 🚀 Deploy (Extract & Start)
+        uses: appleboy/ssh-action@v1.0.0
+        env:
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          SUPER_ADMIN_USERNAME: ${{ secrets.SUPER_ADMIN_USERNAME }}
+          SUPER_ADMIN_PASSWORD: ${{ secrets.SUPER_ADMIN_PASSWORD }}
+          SUPER_ADMIN_EMAIL: ${{ secrets.SUPER_ADMIN_EMAIL }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          timeout: 300s
+          envs: EMAIL_USER,EMAIL_PASSWORD,DB_HOST,DB_PORT,DB_USER,DB_PASSWORD,DB_NAME,JWT_SECRET,JWT_REFRESH_SECRET,SUPER_ADMIN_USERNAME,SUPER_ADMIN_PASSWORD,SUPER_ADMIN_EMAIL
+          command_timeout: 10m
+          script: |
+            set -e
+            
+            echo "🚀 Fast Deployment - Extract & Start"
+            echo "================================================"
+            
+            # Free up memory
+            echo "💾 Freeing memory..."
+            sync
+            echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+            free -h | head -2
+            
+            # Stop PM2
+            echo "🛑 Stopping app..."
+            pm2 stop psr-v4 2>/dev/null || true
+            pm2 delete psr-v4 2>/dev/null || true
+            
+            # Extract package
+            echo "📦 Extracting package..."
+            rm -rf /var/www/psr-v4-new
+            mkdir -p /var/www/psr-v4-new
+            cd /var/www/psr-v4-new
+            tar -xzf /home/ftpuser/psr-cloud-v4/deploy.tar.gz
+            
+            echo "✅ Package extracted"
+            
+            # Install dependencies with VERY low memory settings
+            echo "📦 Installing dependencies (low memory mode)..."
+            export NODE_OPTIONS="--max-old-space-size=256"
+            npm install --production --prefer-offline --no-audit --no-fund --legacy-peer-deps --ignore-scripts 2>&1 | tail -50
+            
+            echo "✅ Dependencies installed"
+            
+            # Swap directories atomically
+            rm -rf /var/www/psr-v4-old
+            if [ -d /var/www/psr-v4 ]; then
+              mv /var/www/psr-v4 /var/www/psr-v4-old
+            fi
+            mv /var/www/psr-v4-new /var/www/psr-v4
+            
+            cd /var/www/psr-v4
+            
+            # Create environment file
+            echo "⚙️ Creating environment..."
+            cat > .env.production << ENVEOF
+            DB_HOST=168.231.121.19
+            DB_PORT=3306
+            DB_USER=${DB_USER}
+            DB_PASSWORD=${DB_PASSWORD}
+            DB_NAME=${DB_NAME}
+            DB_SSL_CA=
+            DB_REJECT_UNAUTHORIZED=false
+            NODE_ENV=production
+            PORT=3000
+            NEXT_TELEMETRY_DISABLED=1
+            JWT_SECRET=${JWT_SECRET}
+            JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+            JWT_EXPIRES_IN=1h
+            JWT_REFRESH_EXPIRES_IN=7d
+            SUPER_ADMIN_USERNAME=${SUPER_ADMIN_USERNAME}
+            SUPER_ADMIN_PASSWORD=${SUPER_ADMIN_PASSWORD}
+            SUPER_ADMIN_EMAIL=${SUPER_ADMIN_EMAIL}
+            SMTP_HOST=smtp.gmail.com
+            SMTP_PORT=587
+            SMTP_SECURE=false
+            SMTP_USERNAME=${EMAIL_USER}
+            SMTP_PASSWORD=${EMAIL_PASSWORD}
+            EMAIL_HOST=smtp.gmail.com
+            EMAIL_PORT=587
+            EMAIL_SECURE=false
+            EMAIL_USER=${EMAIL_USER}
+            EMAIL_PASSWORD=${EMAIL_PASSWORD}
+            EMAIL_FROM=noreply@poornasreeequipments.com
+            NEXT_PUBLIC_API_URL=https://v4.poornasreecloud.com
+            NEXT_PUBLIC_APP_URL=https://v4.poornasreecloud.com
+            CLIENT_URL=https://v4.poornasreecloud.com
+            ENVEOF
+            
+            chmod 600 .env.production
+            
+            # Configure Nginx if not exists
+            if [ ! -f /etc/nginx/sites-available/psr-v4 ]; then
+              echo "🌐 Configuring Nginx..."
+              cat > /etc/nginx/sites-available/psr-v4 << 'NGINXEOF'
+            server {
+                listen 80;
+                listen [::]:80;
+                server_name v4.poornasreecloud.com;
+            
+                location / {
+                    proxy_pass http://localhost:3000;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade $http_upgrade;
+                    proxy_set_header Connection 'upgrade';
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                    proxy_cache_bypass $http_upgrade;
+                }
+            }
+            NGINXEOF
+              
+              ln -sf /etc/nginx/sites-available/psr-v4 /etc/nginx/sites-enabled/
+              nginx -t && systemctl reload nginx
+            fi
+            
+            # Start with PM2
+            echo "🚀 Starting application..."
+            cd /var/www/psr-v4
+            pm2 start ecosystem.config.js --env production
+            pm2 save
+            
+            # Wait and verify
+            echo "⏳ Waiting for startup (20s)..."
+            sleep 20
+            
+            # Health check
+            echo "🔍 Health check..."
+            if curl -f http://localhost:3000 > /dev/null 2>&1; then
+              echo "✅ Application is responding!"
+            else
+              echo "⚠️ App may still be starting, checking logs..."
+              pm2 logs psr-v4 --lines 30 --nostream || true
+            fi
+            
+            echo ""
+            pm2 status
+            echo ""
+            free -h | head -2
+            echo ""
+            echo "================================================"
+            echo "✅ FAST DEPLOYMENT COMPLETED!"
+            echo "🌍 https://v4.poornasreecloud.com"
+            echo "================================================"
+
+      - name: ✅ Summary
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "🎉 Deployment successful!"
+            echo "🌍 https://v4.poornasreecloud.com"
+          else
+            echo "❌ Deployment failed"
+            exit 1
+          fi
