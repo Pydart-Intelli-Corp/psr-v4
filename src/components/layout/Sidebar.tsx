@@ -22,7 +22,8 @@ import {
   Bell,
   Cog,
   Receipt,
-  Cloud
+  Cloud,
+  Smartphone
 } from 'lucide-react';
 import { UserRole } from '@/types/user';
 
@@ -370,7 +371,47 @@ export default function Sidebar({ userRole, isCollapsed, onToggle, onLogout }: S
         })}
       </nav>
 
-      {/* Footer - (Logout removed from sidebar per request) */}
+      {/* Footer - Download App Button */}
+      <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+        <a
+          href="/apk/Psr-Connect.apk"
+          download="Psr-Connect.apk"
+          className="block"
+          title={isCollapsed ? t.nav.downloadApp : undefined}
+        >
+          <motion.div
+            whileHover={{ x: 4 }}
+            className="
+              flex items-center space-x-3 p-3 rounded-xl transition-all duration-200
+              text-gray-700 dark:text-gray-300 hover:bg-gradient-to-r hover:from-green-500 hover:to-emerald-500 hover:text-white hover:shadow-lg
+            "
+          >
+            <Smartphone className="w-5 h-5 flex-shrink-0" />
+            
+            <AnimatePresence mode="wait">
+              {!isCollapsed && (
+                <motion.span
+                  initial={{ opacity: 0, width: 0 }}
+                  animate={{ opacity: 1, width: 'auto' }}
+                  exit={{ opacity: 0, width: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="body-medium font-medium"
+                >
+                  {t.nav.downloadApp}
+                </motion.span>
+              )}
+            </AnimatePresence>
+            
+            {!isCollapsed && (
+              <span className="ml-auto text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
+                APK
+              </span>
+            )}
+          </motion.div>
+        </a>
+      </div>
+
+      {/* (Logout removed from sidebar per request) */}
     </motion.aside>
     </>
   );

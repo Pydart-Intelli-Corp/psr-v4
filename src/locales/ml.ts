@@ -54,6 +54,7 @@ export const ml: TranslationKeys = {
     settings: 'ക്രമീകരണങ്ങൾ',
     profile: 'പ്രൊഫൈൽ',
     logout: 'ലോഗൗട്ട്',
+    downloadApp: 'ആപ്പ് ഡൗൺലോഡ് ചെയ്യുക',
   },
 
   // ഉപയോക്തൃ റോളുകൾ

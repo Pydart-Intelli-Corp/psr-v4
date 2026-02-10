@@ -41,7 +41,42 @@ export async function GET(request: NextRequest) {
     let replacements: any[] = [];
 
     // Build query based on user role
-    if (role === 'society') {
+    if (role === 'admin') {
+      // Admin can see all dispatches in their schema
+      query = `
+        SELECT 
+          d.id,
+          d.dispatch_id,
+          d.dispatch_date,
+          d.dispatch_time,
+          d.quantity,
+          d.fat_percentage,
+          d.snf_percentage,
+          d.clr_value,
+          d.shift_type,
+          d.channel,
+          d.rate_per_liter,
+          d.total_amount,
+          d.machine_type,
+          d.machine_version,
+          d.created_at,
+          s.society_id,
+          s.name as society_name,
+          s.bmc_id,
+          b.name as bmc_name,
+          b.dairy_farm_id as dairy_id,
+          df.name as dairy_name,
+          m.machine_id
+        FROM \`${schemaName}\`.milk_dispatches d
+        LEFT JOIN \`${schemaName}\`.societies s ON d.society_id = s.id
+        LEFT JOIN \`${schemaName}\`.bmcs b ON s.bmc_id = b.id
+        LEFT JOIN \`${schemaName}\`.dairy_farms df ON b.dairy_farm_id = df.id
+        LEFT JOIN \`${schemaName}\`.machines m ON d.machine_id = m.id
+        ORDER BY d.dispatch_date DESC, d.dispatch_time DESC, d.created_at DESC
+        LIMIT ? OFFSET ?
+      `;
+      replacements = [limit, offset];
+    } else if (role === 'society') {
       query = `
         SELECT 
           d.id,

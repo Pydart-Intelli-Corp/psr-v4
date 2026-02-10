@@ -53,8 +53,7 @@ export const hi: TranslationKeys = {
     notifications: 'सूचनाएं',
     settings: 'सेटिंग्स',
     profile: 'प्रोफाइल',
-    logout: 'लॉगआउट',
-  },
+    logout: 'लॉगआउट',    downloadApp: 'ऐप डाउनलोड करें',  },
 
   // उपयोगकर्ता भूमिकाएं
   roles: {

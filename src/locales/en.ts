@@ -52,6 +52,7 @@ export const en = {
     settings: 'Settings',
     profile: 'Profile',
     logout: 'Logout',
+    downloadApp: 'Download App',
   },
 
   // User Roles
