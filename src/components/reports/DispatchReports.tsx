@@ -1590,7 +1590,6 @@ export default function DispatchReports({ globalSearch = '', reportSource = 'soc
                 className="flex items-center justify-center gap-2 px-3 py-2 bg-psr-green-600 text-white rounded-lg hover:bg-psr-green-700 transition-colors text-sm shadow-sm hover:shadow-md"
               >
                 <Download className="w-4 h-4" />
-                <Settings className="w-3 h-3" />
                 <span className="hidden sm:inline">Download</span>
               </button>
               <button
@@ -1598,7 +1597,6 @@ export default function DispatchReports({ globalSearch = '', reportSource = 'soc
                 className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm shadow-sm hover:shadow-md"
               >
                 <Mail className="w-4 h-4" />
-                <Settings className="w-3 h-3" />
                 <span className="hidden sm:inline">Send Mail</span>
               </button>
             </div>
