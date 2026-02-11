@@ -1,14 +1,11 @@
-﻿{
-  "folders": [
-    {
-      "path": "."
-    },
-    {
-      "name": "Poornasree_Connect_Mobile",
-      "path": "../Poornasree_Connect"
-    }
-  ],
-  "settings": {
-    "powershell.cwd": "psr-v4"
-  }
+{
+	"folders": [
+		{
+			"path": "../../.."
+		},
+		{
+			"path": "../../../../Poornasree_Connect"
+		}
+	],
+	"settings": {}
 }

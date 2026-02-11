@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useDongle } from '@/contexts/DongleContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPortal } from 'react-dom';
-import { 
+import { StatusMessage } from '@/components/management';
+import {
   Activity,
   Droplet,
   Thermometer,
@@ -18,7 +20,6 @@ import {
   User,
   Clock,
   TrendingUp,
-  TrendingDown,
   Award,
   AlertTriangle,
   RefreshCw,
@@ -34,12 +35,19 @@ import {
   History,
   Usb,
   Zap,
-  CircleDot,
   Waves,
-  Sparkles
+  Monitor,
+  HelpCircle,
+  Search,
+  MoreVertical,
+  ChevronDown,
+  Shield,
+  Cpu
 } from 'lucide-react';
 
-// Types for control panel
+// ============================================
+// Types
+// ============================================
 interface MilkReading {
   milkType: 'cow' | 'buffalo' | 'mixed';
   fat: number;
@@ -90,216 +98,107 @@ interface ControlPanelDialogProps {
   initialMachineId?: string;
 }
 
-// Empty reading template
 const emptyReading: MilkReading = {
-  milkType: 'cow',
-  fat: 0.0,
-  snf: 0.0,
-  clr: 0.0,
-  protein: 0.0,
-  lactose: 0.0,
-  salt: 0.0,
-  water: 0.0,
-  temperature: 0.0,
-  farmerId: '0',
-  quantity: 0.0,
-  totalAmount: 0.0,
-  rate: 0.0,
-  incentive: 0.0,
-  machineId: '0',
-  timestamp: new Date(),
+  milkType: 'cow', fat: 0.0, snf: 0.0, clr: 0.0, protein: 0.0, lactose: 0.0,
+  salt: 0.0, water: 0.0, temperature: 0.0, farmerId: '0', quantity: 0.0,
+  totalAmount: 0.0, rate: 0.0, incentive: 0.0, machineId: '0', timestamp: new Date(),
 };
 
-/**
- * Extract value from prefixed string (e.g., "F05.21" -> "05.21")
- */
+// ============================================
+// Parser Functions (unchanged logic)
+// ============================================
 function extractValue(part: string, prefix: string): string {
   return part.replace(prefix, '');
 }
 
-/**
- * Parse double value safely
- */
 function parseDoubleValue(value: string): number {
   try {
     const parsed = parseFloat(value);
     return isNaN(parsed) ? 0.0 : parsed;
-  } catch {
-    return 0.0;
-  }
+  } catch { return 0.0; }
 }
 
-/**
- * Parse Lactosure machine pipe-delimited data format (matching Flutter exactly)
- * Format: LE3.36|A|CH1|F05.21|S12.58|C44.10|P04.60|L06.90|s01.04|W00.00|T20.00|I000100|Q00100.00|R00000.00|r000.00|i000.00|MM00201|D2026-01-05_10:28:12
- * 
- * Parts by position:
- * [0]: LE3.36 (version)
- * [1]: A (status)
- * [2]: CH1 (milk type - CH1=Cow, CH2=Buffalo, CH3=Mixed)
- * [3]: F05.21 (FAT)
- * [4]: S12.58 (SNF)
- * [5]: C44.10 (CLR)
- * [6]: P04.60 (Protein)
- * [7]: L06.90 (Lactose)
- * [8]: s01.04 (Salt - lowercase 's')
- * [9]: W00.00 (Water)
- * [10]: T20.00 (Temperature)
- * [11]: I000100 (Farmer ID)
- * [12]: Q00100.00 (Quantity)
- * [13]: R00000.00 (Total Amount)
- * [14]: r000.00 (Rate - lowercase 'r')
- * [15]: i000.00 (Incentive - lowercase 'i')
- * [16]: MM00201 (Machine ID)
- * [17]: D2026-01-05_10:28:12 (Timestamp)
- */
 function parseLactosureData(rawData: string): MilkReading | null {
   try {
-    console.log('🔵 [Parser] Raw data received:', rawData);
-    console.log('🔵 [Parser] Data length:', rawData.length, 'characters');
-
-    // Remove trailing control characters (like Flutter: replaceAll(RegExp(r'\^@|\r|\n'), ''))
     const cleanData = rawData.replace(/\^@|\r|\n|[\x00-\x1F\x7F]/g, '').trim();
-    console.log('🔵 [Parser] After cleanup:', cleanData);
-
-    // Split by pipe delimiter
     const parts = cleanData.split('|');
-    console.log('🔵 [Parser] Split into', parts.length, 'parts');
+    if (parts.length < 16) return null;
 
-    // Flutter requires at least 16 parts
-    if (parts.length < 16) {
-      console.log('❌ [Parser] Invalid data - expected at least 16 parts, got', parts.length);
-      console.log('📄 [Parser] Parts:', parts);
-      return null;
-    }
-
-    console.log('📋 [Parser] Parsing each field:');
-    for (let i = 0; i < Math.min(parts.length, 18); i++) {
-      console.log(`   [${i}]: ${parts[i]}`);
-    }
-
-    // Parse timestamp if available (parts[17]: D2026-01-05_10:28:12)
     let readingTimestamp = new Date();
     if (parts.length > 17) {
       try {
         const timestampStr = extractValue(parts[17], 'D');
-        // Format: 2026-01-05_10:28:12
         const cleanTimestamp = timestampStr.replace('_', 'T');
         const parsed = new Date(cleanTimestamp);
-        if (!isNaN(parsed.getTime())) {
-          readingTimestamp = parsed;
-        }
-      } catch (e) {
-        console.log('⚠️ [Parser] Could not parse timestamp:', e);
-      }
+        if (!isNaN(parsed.getTime())) readingTimestamp = parsed;
+      } catch {}
     }
 
-    // Parse milk type from CH field (parts[2])
     const chValue = extractValue(parts[2], 'CH');
     let milkType: 'cow' | 'buffalo' | 'mixed' = 'cow';
-    if (chValue === '2') {
-      milkType = 'buffalo';
-    } else if (chValue === '3') {
-      milkType = 'mixed';
-    }
+    if (chValue === '2') milkType = 'buffalo';
+    else if (chValue === '3') milkType = 'mixed';
 
-    const reading: MilkReading = {
-      milkType: milkType,                                           // parts[2]: CH1/CH2/CH3
-      fat: parseDoubleValue(extractValue(parts[3], 'F')),           // parts[3]: F05.21
-      snf: parseDoubleValue(extractValue(parts[4], 'S')),           // parts[4]: S12.58
-      clr: parseDoubleValue(extractValue(parts[5], 'C')),           // parts[5]: C44.10
-      protein: parseDoubleValue(extractValue(parts[6], 'P')),       // parts[6]: P04.60
-      lactose: parseDoubleValue(extractValue(parts[7], 'L')),       // parts[7]: L06.90
-      salt: parseDoubleValue(extractValue(parts[8], 's')),          // parts[8]: s01.04 (lowercase s!)
-      water: parseDoubleValue(extractValue(parts[9], 'W')),         // parts[9]: W00.00
-      temperature: parseDoubleValue(extractValue(parts[10], 'T')),  // parts[10]: T20.00
-      farmerId: extractValue(parts[11], 'I'),                       // parts[11]: I000100
-      quantity: parseDoubleValue(extractValue(parts[12], 'Q')),     // parts[12]: Q00100.00
-      totalAmount: parseDoubleValue(extractValue(parts[13], 'R')),  // parts[13]: R00000.00
-      rate: parseDoubleValue(extractValue(parts[14], 'r')),         // parts[14]: r000.00 (lowercase r!)
-      incentive: parseDoubleValue(extractValue(parts[15], 'i')),    // parts[15]: i000.00 (lowercase i!)
-      machineId: parts.length > 16 
-        ? extractValue(parts[16], 'MM') 
-        : '0',                                                      // parts[16]: MM00201
-      timestamp: readingTimestamp,                                  // parts[17]: D2026-01-05_10:28:12
+    return {
+      milkType,
+      fat: parseDoubleValue(extractValue(parts[3], 'F')),
+      snf: parseDoubleValue(extractValue(parts[4], 'S')),
+      clr: parseDoubleValue(extractValue(parts[5], 'C')),
+      protein: parseDoubleValue(extractValue(parts[6], 'P')),
+      lactose: parseDoubleValue(extractValue(parts[7], 'L')),
+      salt: parseDoubleValue(extractValue(parts[8], 's')),
+      water: parseDoubleValue(extractValue(parts[9], 'W')),
+      temperature: parseDoubleValue(extractValue(parts[10], 'T')),
+      farmerId: extractValue(parts[11], 'I'),
+      quantity: parseDoubleValue(extractValue(parts[12], 'Q')),
+      totalAmount: parseDoubleValue(extractValue(parts[13], 'R')),
+      rate: parseDoubleValue(extractValue(parts[14], 'r')),
+      incentive: parseDoubleValue(extractValue(parts[15], 'i')),
+      machineId: parts.length > 16 ? extractValue(parts[16], 'MM') : '0',
+      timestamp: readingTimestamp,
     };
-
-    console.log('✅ [Parser] Successfully created reading:', {
-      fat: reading.fat,
-      snf: reading.snf,
-      clr: reading.clr,
-      farmerId: reading.farmerId,
-      machineId: reading.machineId,
-    });
-
-    return reading;
-  } catch (e) {
-    console.log('❌ [Parser] Error parsing lactosure data:', e);
-    return null;
-  }
+  } catch { return null; }
 }
 
-// Toast Notification
-function Toast({ type, message, onClose }: { type: 'success' | 'error'; message: string; onClose: () => void; }) {
-  useEffect(() => {
-    const timer = setTimeout(onClose, 4000);
-    return () => clearTimeout(timer);
-  }, [onClose]);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -30, scale: 0.9 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -30, scale: 0.9 }}
-      className={`flex items-center gap-3 px-5 py-3.5 rounded-2xl backdrop-blur-xl shadow-2xl ${
-        type === 'success' 
-          ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300' 
-          : 'bg-red-500/20 border border-red-500/40 text-red-300'
-      }`}
-    >
-      {type === 'success' ? <Check className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
-      <span className="text-sm font-medium">{message}</span>
-      <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-full transition-colors ml-2">
-        <X className="w-4 h-4" />
-      </button>
-    </motion.div>
-  );
-}
-
+// ============================================
+// Main Component
+// ============================================
 export default function ControlPanelDialog({ isOpen, onClose, machineDbId, initialMachineId }: ControlPanelDialogProps) {
+  // Theme
+  const { theme } = useTheme();
+  const  isDark = theme === 'dark';
+  
   // Machine state
   const [machine, setMachine] = useState<MachineConnection | null>(null);
   const [connectedMachines, setConnectedMachines] = useState<MachineConnection[]>([]);
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(initialMachineId || null);
-  
-  // Reading state - matching Flutter's _machineReadings and _machineReadingHistory
+
+  // Reading state
   const [machineReadings, setMachineReadings] = useState<Map<string, MilkReading>>(new Map());
-  const [machineReadingHistory, setMachineReadingHistory] = useState<Map<string, MilkReading[]>>(new Map()); // Per-machine history like Flutter
+  const [machineReadingHistory, setMachineReadingHistory] = useState<Map<string, MilkReading[]>>(new Map());
   const [isViewingHistory, setIsViewingHistory] = useState(false);
   const [historyIndex, setHistoryIndex] = useState(0);
-  const MAX_HISTORY_POINTS = 20; // Matching Flutter's _maxHistoryPoints
-  
-  // Test state - matching Flutter's _isTestRunning, _currentTestMachines, _machinesWithDataReceived
+  const MAX_HISTORY_POINTS = 20;
+
+  // Test state
   const [isTestRunning, setIsTestRunning] = useState(false);
   const [testElapsedSeconds, setTestElapsedSeconds] = useState(0);
   const [selectedChannel, setSelectedChannel] = useState<'CH1' | 'CH2' | 'CH3'>('CH1');
-  const [currentTestMachines, setCurrentTestMachines] = useState<string[]>([]); // Machines being tested
-  const [machinesWithDataReceived, setMachinesWithDataReceived] = useState<Set<string>>(new Set()); // Machines that received data during test
-  
-  // Machine modes (Auto/Manual) - per machine settings
-  const [machineWeighingScaleMode, setMachineWeighingScaleMode] = useState<Map<string, boolean>>(new Map()); // true = Auto, false = Manual
-  const [machineFarmerIdMode, setMachineFarmerIdMode] = useState<Map<string, boolean>>(new Map()); // true = Auto, false = Manual (default)
-  
-  // Farmer ID and Weight inputs per machine
+  const [currentTestMachines, setCurrentTestMachines] = useState<string[]>([]);
+  const [machinesWithDataReceived, setMachinesWithDataReceived] = useState<Set<string>>(new Set());
+
+  // Machine modes
+  const [machineWeighingScaleMode, setMachineWeighingScaleMode] = useState<Map<string, boolean>>(new Map());
+  const [machineFarmerIdMode, setMachineFarmerIdMode] = useState<Map<string, boolean>>(new Map());
   const [machineFarmerIds, setMachineFarmerIds] = useState<Map<string, string>>(new Map());
   const [machineWeights, setMachineWeights] = useState<Map<string, string>>(new Map());
-  
+
   // Dialog states
   const [showFarmerIdDialog, setShowFarmerIdDialog] = useState(false);
   const [showWeightDialog, setShowWeightDialog] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [pendingTestMachines, setPendingTestMachines] = useState<string[]>([]);
-  
+
   // Today's statistics
   const [todayStats, setTodayStats] = useState<TodayStats>({
     totalTests: 0, totalQuantity: 0, totalAmount: 0,
@@ -310,31 +209,348 @@ export default function ControlPanelDialog({ isOpen, onClose, machineDbId, initi
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  
+
   // Dongle context
   const {
     connectedPort, isDongleVerified, connectedBLEMachines,
     sendDongleCommand, onBleData, offBleData,
   } = useDongle();
-  
+
   // Refs
   const testTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const pendingFarmerIdsRef = useRef<Map<string, string>>(new Map()); // Store farmer IDs between dialogs
+  const pendingFarmerIdsRef = useRef<Map<string, string>>(new Map());
   const [mounted, setMounted] = useState(false);
+
+  // Cache management constants
+  const CACHE_KEYS = {
+    MACHINE_READINGS: 'psr_machine_readings',
+    READING_HISTORY: 'psr_reading_history',
+    TODAY_STATS: 'psr_today_stats',
+    MACHINE_DATA: 'psr_machine_data',
+    CONNECTED_MACHINES: 'psr_connected_machines',
+    LAST_CACHE_DATE: 'psr_last_cache_date',
+    CACHE_EXPIRY_HOURS: 24 // Cache expires after 24 hours
+  };
+
+  // Cache management functions
+  const saveToCache = useCallback((key: string, data: any) => {
+    try {
+      if (typeof window !== 'undefined') {
+        const cacheData = {
+          data,
+          timestamp: new Date().toISOString(),
+          date: new Date().toDateString()
+        };
+        localStorage.setItem(key, JSON.stringify(cacheData));
+        console.log(`Cache Debug - Saved ${key}:`, data);
+      }
+    } catch (error) {
+      console.error('Failed to save to cache:', key, error);
+    }
+  }, []);
+
+  const loadFromCache = useCallback((key: string) => {
+    try {
+      if (typeof window !== 'undefined') {
+        const cached = localStorage.getItem(key);
+        if (cached) {
+          const parsedCache = JSON.parse(cached);
+          const cacheDate = new Date(parsedCache.timestamp);
+          const now = new Date();
+          const hoursDiff = (now.getTime() - cacheDate.getTime()) / (1000 * 60 * 60);
+          
+          // Check if cache is still valid (within expiry hours)
+          if (hoursDiff < CACHE_KEYS.CACHE_EXPIRY_HOURS) {
+            console.log(`Cache Debug - Loaded ${key} (${hoursDiff.toFixed(1)}h old):`, parsedCache.data);
+            return parsedCache.data;
+          } else {
+            console.log(`Cache Debug - Expired cache for ${key} (${hoursDiff.toFixed(1)}h old), removing`);
+            localStorage.removeItem(key);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load from cache:', key, error);
+    }
+    return null;
+  }, []);
+
+  const clearTodayCache = useCallback(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const today = new Date().toDateString();
+        const lastCacheDate = localStorage.getItem(CACHE_KEYS.LAST_CACHE_DATE);
+        
+        if (lastCacheDate && lastCacheDate !== today) {
+          // Clear today's cache if it's a new day
+          localStorage.removeItem(CACHE_KEYS.TODAY_STATS);
+          localStorage.setItem(CACHE_KEYS.LAST_CACHE_DATE, today);
+          console.log('Cache Debug - Cleared today cache for new day');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to clear today cache:', error);
+    }
+  }, []);
+
+  const serializeMapForCache = useCallback((map: Map<any, any>) => {
+    return Array.from(map.entries());
+  }, []);
+
+  const deserializeMapFromCache = useCallback((serialized: any[]): Map<any, any> => {
+    return new Map(serialized);
+  }, []);
+
+  // Add function to manually clear all cache
+  const clearAllCache = useCallback(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        Object.values(CACHE_KEYS).forEach(key => {
+          if (typeof key === 'string') {
+            localStorage.removeItem(key);
+          }
+        });
+        console.log('Cache Debug - All cache cleared manually');
+        
+        // Reset states to initial values
+        setMachineReadings(new Map());
+        setMachineReadingHistory(new Map());
+        setTodayStats({
+          totalTests: 0, totalQuantity: 0, totalAmount: 0,
+          avgFat: 0, avgSnf: 0, highestFat: 0, lowestFat: 0, highestSnf: 0, lowestSnf: 0,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to clear all cache:', error);
+    }
+  }, []);
+
+  // Combined function to clear all live data (readings + trend history + cache)
+  const clearAllLiveData = useCallback(() => {
+    try {
+      // Clear current readings
+      setMachineReadings(new Map());
+      
+      // Clear trend history
+      setMachineReadingHistory(new Map());
+      
+      // Clear relevant cache entries
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(CACHE_KEYS.MACHINE_READINGS);
+        localStorage.removeItem(CACHE_KEYS.READING_HISTORY);
+        console.log('Cache Debug - Cleared live data cache');
+      }
+      
+      console.log('Live Data Debug - Cleared all current readings and trend history');
+    } catch (error) {
+      console.error('Failed to clear live data:', error);
+    }
+  }, []);
+
+  // Function to clear only current readings (not cache or history)
+  const clearCurrentReadingsOnly = useCallback(() => {
+    try {
+      // Clear only current readings - this affects Current Readings and Transaction display
+      setMachineReadings(new Map());
+      
+      // Note: Cache and trend history are preserved
+      console.log('Live Data Debug - Cleared current readings only (cache and history preserved)');
+      setSuccess('Current readings cleared');
+    } catch (error) {
+      console.error('Failed to clear current readings:', error);
+      setError('Failed to clear readings');
+    }
+  }, []);
+
+  // Helper function to filter only today's readings
+  const filterTodayReadings = useCallback((readings: MilkReading[]): MilkReading[] => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return readings.filter(reading => {
+      const readingDate = new Date(reading.timestamp);
+      readingDate.setHours(0, 0, 0, 0);
+      return readingDate.getTime() === today.getTime();
+    });
+  }, []);
+
+  const calculateTodayStats = useCallback((readings: MilkReading[]) => {
+    if (readings.length === 0) {
+      setTodayStats({ totalTests: 0, totalQuantity: 0, totalAmount: 0, avgFat: 0, avgSnf: 0, highestFat: 0, lowestFat: 0, highestSnf: 0, lowestSnf: 0 });
+      return;
+    }
+    let sumFat = 0, sumSnf = 0, sumQuantity = 0, sumAmount = 0;
+    let maxFat = 0, minFat = Infinity, maxSnf = 0, minSnf = Infinity;
+    
+    console.log(`Today Stats Debug - Processing ${readings.length} readings:`);
+    readings.forEach((r, index) => {
+      console.log(`  Reading ${index + 1}: qty=${r.quantity}, amount=${r.totalAmount}, fat=${r.fat}, snf=${r.snf}`);
+      sumFat += r.fat; sumSnf += r.snf; sumQuantity += r.quantity; sumAmount += r.totalAmount;
+      maxFat = Math.max(maxFat, r.fat); minFat = Math.min(minFat, r.fat);
+      maxSnf = Math.max(maxSnf, r.snf); minSnf = Math.min(minSnf, r.snf);
+    });
+    
+    console.log(`Today Stats Debug - Totals: tests=${readings.length}, qty=${sumQuantity}, amount=${sumAmount}`);
+    
+    setTodayStats({
+      totalTests: readings.length, totalQuantity: sumQuantity, totalAmount: sumAmount,
+      avgFat: sumFat / readings.length, avgSnf: sumSnf / readings.length,
+      highestFat: maxFat, lowestFat: minFat === Infinity ? 0 : minFat,
+      highestSnf: maxSnf, lowestSnf: minSnf === Infinity ? 0 : minSnf,
+    });
+  }, []);
 
   useEffect(() => {
     setMounted(true);
-    return () => setMounted(false);
-  }, []);
+    
+    // Clear old cache if it's a new day
+    clearTodayCache();
+    
+    // Load cached data on mount
+    const loadCachedData = async () => {
+      try {
+        // Load machine readings
+        const cachedReadings = loadFromCache(CACHE_KEYS.MACHINE_READINGS);
+        if (cachedReadings) {
+          setMachineReadings(deserializeMapFromCache(cachedReadings));
+        }
 
-  // Extract numeric ID from machine ID
+        // Load reading history
+        const cachedHistory = loadFromCache(CACHE_KEYS.READING_HISTORY);
+        if (cachedHistory) {
+          // Deserialize nested structure: Map<string, MilkReading[]>
+          const historyMap = new Map();
+          const allReadings: MilkReading[] = [];
+          cachedHistory.forEach(([key, readings]: [string, MilkReading[]]) => {
+            // Convert timestamp strings back to Date objects
+            const processedReadings = readings.map(reading => ({
+              ...reading,
+              timestamp: new Date(reading.timestamp)
+            }));
+            historyMap.set(key, processedReadings);
+            allReadings.push(...processedReadings);
+          });
+          setMachineReadingHistory(historyMap);
+          
+          // Calculate today's stats from cached history
+          const todayReadings = filterTodayReadings(allReadings);
+          if (todayReadings.length > 0) {
+            calculateTodayStats(todayReadings);
+            console.log(`Cache Debug - Recalculated today's stats from ${todayReadings.length} cached today's readings`);
+          }
+        }
+
+        // Load today's stats (fallback if no history available)
+        const cachedStats = loadFromCache(CACHE_KEYS.TODAY_STATS);
+        if (cachedStats && !cachedHistory) {
+          setTodayStats(cachedStats);
+        }
+
+        // Load machine data
+        const cachedMachine = loadFromCache(CACHE_KEYS.MACHINE_DATA);
+        if (cachedMachine) {
+          setMachine({
+            ...cachedMachine,
+            lastActivity: cachedMachine.lastActivity ? new Date(cachedMachine.lastActivity) : undefined
+          });
+        }
+
+        // Load connected machines
+        const cachedConnectedMachines = loadFromCache(CACHE_KEYS.CONNECTED_MACHINES);
+        if (cachedConnectedMachines) {
+          const processedMachines = cachedConnectedMachines.map((m: any) => ({
+            ...m,
+            lastActivity: m.lastActivity ? new Date(m.lastActivity) : undefined
+          }));
+          setConnectedMachines(processedMachines);
+        }
+
+        console.log('Cache Debug - All cached data loaded successfully');
+      } catch (error) {
+        console.error('Failed to load cached data:', error);
+      }
+    };
+
+    loadCachedData();
+    return () => setMounted(false);
+  }, [clearTodayCache, loadFromCache, deserializeMapFromCache, filterTodayReadings, calculateTodayStats]);
+
+  // Save readings to cache when they change
+  useEffect(() => {
+    if (mounted && machineReadings.size > 0) {
+      saveToCache(CACHE_KEYS.MACHINE_READINGS, serializeMapForCache(machineReadings));
+    }
+  }, [machineReadings, saveToCache, serializeMapForCache, mounted]);
+
+  // Save reading history to cache when it changes
+  useEffect(() => {
+    if (mounted && machineReadingHistory.size > 0) {
+      saveToCache(CACHE_KEYS.READING_HISTORY, serializeMapForCache(machineReadingHistory));
+    }
+  }, [machineReadingHistory, saveToCache, serializeMapForCache, mounted]);
+
+  // Save today's stats to cache when they change
+  useEffect(() => {
+    if (mounted && todayStats.totalTests > 0) {
+      saveToCache(CACHE_KEYS.TODAY_STATS, todayStats);
+    }
+  }, [todayStats, saveToCache, mounted]);
+
+  // Save machine data to cache when it changes
+  useEffect(() => {
+    if (mounted && machine) {
+      saveToCache(CACHE_KEYS.MACHINE_DATA, machine);
+    }
+  }, [machine, saveToCache, mounted]);
+
+  // Save connected machines to cache when they change
+  useEffect(() => {
+    if (mounted && connectedMachines.length > 0) {
+      saveToCache(CACHE_KEYS.CONNECTED_MACHINES, connectedMachines);
+    }
+  }, [connectedMachines, saveToCache, mounted]);
+
   const extractNumericId = useCallback((machineId: string | undefined): string | null => {
     if (!machineId) return null;
     const numericId = machineId.replace(/[^0-9]/g, '').replace(/^0+/, '');
     return numericId || null;
   }, []);
-  
-  // Send command to ALL connected machines via SENDHEXALL
+
+  // For testing - generate sample trend data
+  const generateSampleTrendData = useCallback(() => {
+    const sampleData: MilkReading[] = [];
+    const now = new Date();
+    for (let i = 0; i < 10; i++) {
+      const timestamp = new Date(now.getTime() - (i * 60000)); // Every minute going back
+      sampleData.unshift({
+        milkType: 'cow' as const,
+        fat: 3.5 + Math.random() * 1.5, // 3.5-5.0
+        snf: 8.0 + Math.random() * 2.0, // 8.0-10.0
+        clr: 30 + Math.random() * 5,
+        protein: 3.2 + Math.random() * 0.5,
+        lactose: 4.5 + Math.random() * 0.3,
+        salt: 0.7 + Math.random() * 0.1,
+        water: 87.0 + Math.random() * 1.0,
+        temperature: 35 + Math.random() * 3,
+        farmerId: '1001',
+        quantity: 500 + Math.random() * 200,
+        totalAmount: 45 + Math.random() * 15,
+        rate: 45 + Math.random() * 5,
+        incentive: 2 + Math.random() * 3,
+        machineId: selectedMachineId || '1',
+        timestamp: timestamp,
+        shift: 'MR' as const
+      });
+    }
+    
+    const machineId = selectedMachineId || '1';
+    console.log(`Trend Debug - Generating ${sampleData.length} sample readings for machine ${machineId}`);
+    setMachineReadingHistory(prev => {
+      const newHistory = new Map(prev);
+      newHistory.set(machineId, sampleData);
+      return newHistory;
+    });
+  }, [selectedMachineId]);
+
   const sendToAllMachines = useCallback(async (hexCommand: string): Promise<boolean> => {
     if (connectedPort && isDongleVerified) {
       return await sendDongleCommand(`SENDHEXALL,${hexCommand}`);
@@ -343,139 +559,91 @@ export default function ControlPanelDialog({ isOpen, onClose, machineDbId, initi
     return false;
   }, [connectedPort, isDongleVerified, sendDongleCommand]);
 
-  // Normalize machine ID - matching Flutter's _normalizeId
-  // Strips 'M' prefix and leading zeros
   const normalizeId = useCallback((id: string): string => {
     return id.replace(/^[Mm]+/, '').replace(/^0+/, '') || '0';
   }, []);
-  
-  // BLE data subscription - matching Flutter's _setupBLEListener with updateWithBLEData pattern
+
+  // BLE data subscription
   useEffect(() => {
     if (!isOpen) return;
-    
     const handleBleData = (machineId: string, data: string) => {
-      console.log('\n▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼');
-      console.log(`📡 [Control Panel] BLE data received for machine: ${machineId}`);
-      console.log(`📡 [Control Panel] Raw data length: ${data.length} characters`);
-      
       const parsed = parseLactosureData(data);
-      if (!parsed) {
-        console.log('❌ [Control Panel] Failed to parse data');
-        console.log('▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲\n');
-        return;
-      }
+      if (!parsed) return;
 
-      // Normalize machine ID for storage (matching Flutter)
       const storageKey = normalizeId(machineId);
-      console.log(`🔑 [Control Panel] Storage key (normalized): ${storageKey}`);
-      
       const readingWithMachine = { ...parsed, machineId: storageKey };
-      
-      // Update machine readings Map
+
       setMachineReadings(prev => {
         const newMap = new Map(prev);
         newMap.set(storageKey, readingWithMachine);
-        console.log(`✅ [Control Panel] Updated machineReadings for: ${storageKey}`);
         return newMap;
       });
-      
-      // Set selected machine if not set
+
       if (!selectedMachineId) setSelectedMachineId(storageKey);
-      
-      // Update per-machine reading history (matching Flutter's _machineReadingHistory)
+
       setMachineReadingHistory(prev => {
         const newHistory = new Map(prev);
         const machineHistory = newHistory.get(storageKey) || [];
         const updatedHistory = [...machineHistory, readingWithMachine];
-        
-        // Limit to MAX_HISTORY_POINTS (matching Flutter's _maxHistoryPoints)
-        if (updatedHistory.length > MAX_HISTORY_POINTS) {
-          updatedHistory.shift(); // Remove oldest
-        }
-        
+        if (updatedHistory.length > MAX_HISTORY_POINTS) updatedHistory.shift();
         newHistory.set(storageKey, updatedHistory);
-        console.log(`📊 [Control Panel] History size for ${storageKey}: ${updatedHistory.length}`);
+        console.log(`Trend Debug - Adding reading to machine ${storageKey}, total history: ${updatedHistory.length}`);
         
-        // Calculate stats from all machine histories
+        // Calculate today's stats from all machines' today's readings (cached + live)
         const allReadings: MilkReading[] = [];
         newHistory.forEach(readings => allReadings.push(...readings));
-        calculateTodayStats(allReadings);
+        const todayReadings = filterTodayReadings(allReadings);
+        calculateTodayStats(todayReadings);
         
         return newHistory;
       });
-      
-      // Track machine that received data during test (matching Flutter)
+
       if (isTestRunning && currentTestMachines.length > 0) {
-        // Find matching machine in current test
         for (const testMachine of currentTestMachines) {
           const normalizedTest = normalizeId(testMachine);
           if (normalizedTest === storageKey || testMachine === storageKey) {
-            console.log(`✅ [Test] Machine ${testMachine} received data`);
-            
             setMachinesWithDataReceived(prev => {
               const newSet = new Set(prev);
               newSet.add(testMachine);
-              console.log(`✅ [Test] Machines with data: ${newSet.size}/${currentTestMachines.length}`);
-              
-              // Check if ALL machines received data - mark complete (matching Flutter)
               if (newSet.size >= currentTestMachines.length && currentTestMachines.length > 0) {
-                console.log('🎉 [Test] All machines received data!');
-                // Complete test
                 handleStopTest();
                 setSuccess(`Test Complete: All ${currentTestMachines.length} machine(s) received data! FAT ${parsed.fat.toFixed(2)}%, SNF ${parsed.snf.toFixed(2)}%`);
               }
-              
               return newSet;
             });
             break;
           }
         }
       } else {
-        // Not in test mode - show notification for data received (matching Flutter's _showDataReceivedSnackbar)
         if (parsed.fat > 0 || parsed.snf > 0) {
           setSuccess(`Data received from M${storageKey}: FAT ${parsed.fat.toFixed(1)}% | SNF ${parsed.snf.toFixed(1)}% | CLR ${parsed.clr.toFixed(1)}`);
         }
       }
-      
-      console.log(`✅ [Control Panel] UI updated for machine: ${storageKey}`);
-      console.log('▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲\n');
     };
-    
     onBleData(handleBleData);
     return () => offBleData(handleBleData);
-  }, [isOpen, selectedMachineId, onBleData, offBleData, isTestRunning, currentTestMachines, normalizeId]);
+  }, [isOpen, selectedMachineId, onBleData, offBleData, isTestRunning, currentTestMachines, normalizeId, filterTodayReadings, calculateTodayStats]);
 
   // Update connected machines
   useEffect(() => {
     if (!isOpen) return;
-    
     const bleConnected: MachineConnection[] = Array.from(connectedBLEMachines).map(machineId => ({
-      id: machineId, 
-      machineId, 
-      machineName: `Machine M-${machineId}`,
-      isConnected: true, 
-      signalStrength: 'excellent' as const,
+      id: machineId, machineId, machineName: `Machine M-${machineId}`,
+      isConnected: true, signalStrength: 'excellent' as const,
     }));
-    
     if (machine) {
       const apiMachineNumericId = extractNumericId(machine.machineId);
       const existsInBle = bleConnected.some(m => m.machineId === apiMachineNumericId);
-      
       if (!existsInBle && apiMachineNumericId) {
         bleConnected.unshift({
-          id: machine.id,
-          machineId: apiMachineNumericId,
+          id: machine.id, machineId: apiMachineNumericId,
           machineName: machine.machineName,
           isConnected: connectedBLEMachines.has(apiMachineNumericId),
           signalStrength: connectedBLEMachines.has(apiMachineNumericId) ? 'excellent' : 'poor',
         });
       }
     }
-    
-    if (bleConnected.length > 0) {
-      setConnectedMachines(bleConnected);
-    }
-    
+    if (bleConnected.length > 0) setConnectedMachines(bleConnected);
     if (!selectedMachineId && bleConnected.length > 0) {
       const apiMachineNumericId = extractNumericId(machine?.machineId);
       if (apiMachineNumericId && connectedBLEMachines.has(apiMachineNumericId)) {
@@ -486,36 +654,27 @@ export default function ControlPanelDialog({ isOpen, onClose, machineDbId, initi
     }
   }, [isOpen, connectedBLEMachines, selectedMachineId, machine, extractNumericId]);
 
-  const machinesWithData = Array.from(machineReadings.keys());
-
   // Fetch machine details
   const fetchMachineDetails = useCallback(async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('authToken');
-      if (!token) {
-        setLoading(false);
-        return;
-      }
+      if (!token) { setLoading(false); return; }
 
       const response = await fetch(`/api/user/machine?id=${machineDbId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      
+
       if (!response.ok) {
-        // If API fails (machineDbId might be a BLE numeric ID), create fallback machine (like Flutter's orElse)
         const fallbackMachine: MachineConnection = {
-          id: machineDbId,
-          machineId: isNaN(parseInt(machineDbId, 10)) ? machineDbId : `M-${machineDbId}`,
+          id: machineDbId, machineId: isNaN(parseInt(machineDbId, 10)) ? machineDbId : `M-${machineDbId}`,
           machineName: `Machine M-${machineDbId}`,
           isConnected: connectedBLEMachines.has(machineDbId) || connectedBLEMachines.has(machineDbId.replace(/^0+/, '')),
           signalStrength: 'excellent'
         };
         setMachine(fallbackMachine);
         setConnectedMachines(prev => prev.length > 0 ? prev : [fallbackMachine]);
-        if (!selectedMachineId) {
-          setSelectedMachineId(machineDbId.replace(/^0+/, '') || machineDbId);
-        }
+        if (!selectedMachineId) setSelectedMachineId(machineDbId.replace(/^0+/, '') || machineDbId);
         setLoading(false);
         return;
       }
@@ -534,103 +693,164 @@ export default function ControlPanelDialog({ isOpen, onClose, machineDbId, initi
         setConnectedMachines([machineConnection]);
         await fetchMachineReadings(machineData.machineId, token);
       } else {
-        // No data from API - use fallback (like Flutter's orElse)
         const fallbackMachine: MachineConnection = {
-          id: machineDbId,
-          machineId: `M-${machineDbId}`,
+          id: machineDbId, machineId: `M-${machineDbId}`,
           machineName: `Machine M-${machineDbId}`,
           isConnected: connectedBLEMachines.has(machineDbId) || connectedBLEMachines.has(machineDbId.replace(/^0+/, '')),
           signalStrength: 'excellent'
         };
         setMachine(fallbackMachine);
         setConnectedMachines(prev => prev.length > 0 ? prev : [fallbackMachine]);
-        if (!selectedMachineId) {
-          setSelectedMachineId(machineDbId.replace(/^0+/, '') || machineDbId);
-        }
+        if (!selectedMachineId) setSelectedMachineId(machineDbId.replace(/^0+/, '') || machineDbId);
       }
-    } catch { 
-      // On any error, create fallback machine (like Flutter's orElse)
+    } catch {
       const fallbackMachine: MachineConnection = {
-        id: machineDbId,
-        machineId: `M-${machineDbId}`,
-        machineName: `Machine M-${machineDbId}`,
-        isConnected: true,
-        signalStrength: 'excellent'
+        id: machineDbId, machineId: `M-${machineDbId}`,
+        machineName: `Machine M-${machineDbId}`, isConnected: true, signalStrength: 'excellent'
       };
       setMachine(fallbackMachine);
       setConnectedMachines(prev => prev.length > 0 ? prev : [fallbackMachine]);
-    }
-    finally { setLoading(false); }
+    } finally { setLoading(false); }
   }, [machineDbId, connectedBLEMachines, selectedMachineId]);
 
-  // Fetch machine readings
   const fetchMachineReadings = async (machineId: string, token: string) => {
     try {
-      const response = await fetch(`/api/user/reports/collections`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      // Check if we have cached data for this machine
+      const normalizedId = machineId.replace(/^[Mm]+/, '').replace(/^0+/, '') || '0';
+      const cachedHistory = machineReadingHistory.get(normalizedId);
+      const cacheKey = `${CACHE_KEYS.READING_HISTORY}_${normalizedId}`;
+      
+      // Always fetch fresh data from API for today's readings
+      console.log(`Cache Debug - Fetching fresh data for machine ${machineId}`);
+      const response = await fetch(`/api/user/reports/collections`, { headers: { 'Authorization': `Bearer ${token}` } });
+      
+      console.log(`API Debug - Response status: ${response.status}, ok: ${response.ok}`);
+      
       if (response.ok) {
         const result = await response.json();
-        if (result.success && Array.isArray(result.data)) {
-          const today = new Date(); today.setHours(0, 0, 0, 0);
-          const machineCollections = result.data
+        console.log(`API Debug - Response is array: ${Array.isArray(result)}, length: ${Array.isArray(result) ? result.length : 'N/A'}`);
+        
+        // API returns direct array of collections, not { success: true, data: [...] }
+        if (Array.isArray(result)) {
+          console.log(`API Debug - Received ${result.length} total collections from API`);
+          
+          // Get today's date for filtering
+          const today = new Date(); 
+          today.setHours(0, 0, 0, 0);
+          
+          // Get all machine data from API
+          const allMachineCollections = result
             .filter((col: any) => col.machine_id === machineId)
-            .filter((col: any) => {
-              const colDate = new Date(col.collection_date);
-              colDate.setHours(0, 0, 0, 0);
-              return colDate.getTime() === today.getTime();
-            })
-            .map((col: any): MilkReading => ({
-              milkType: col.channel?.toLowerCase() === 'buffalo' ? 'buffalo' : col.channel?.toLowerCase() === 'mixed' ? 'mixed' : 'cow',
-              fat: parseFloat(col.fat) || 0, snf: parseFloat(col.snf) || 0, clr: parseFloat(col.clr) || 0,
-              protein: parseFloat(col.protein) || 0, lactose: parseFloat(col.lactose) || 0,
-              salt: parseFloat(col.salt) || 0, water: parseFloat(col.water) || 0,
-              temperature: parseFloat(col.temperature) || 0, farmerId: col.farmer_id?.toString() || '0',
-              quantity: parseFloat(col.quantity) || 0, totalAmount: parseFloat(col.total_amount) || 0,
-              rate: parseFloat(col.rate) || 0, incentive: parseFloat(col.bonus) || 0,
-              machineId: col.machine_id, timestamp: new Date(col.collection_date + ' ' + (col.collection_time || '00:00:00')),
-              shift: col.session === 'MO' ? 'MR' : 'EV',
-            }));
-          // Store in per-machine history (matching Flutter's _machineReadingHistory)
-          if (machineCollections.length > 0) {
-            const normalizedId = machineId.replace(/^[Mm]+/, '').replace(/^0+/, '') || '0';
+            .map((col: any): MilkReading => {
+              console.log(`API Debug - Raw collection: machine=${col.machine_id}, qty=${col.quantity}, total_amount=${col.total_amount}, rate=${col.rate}, farmer=${col.farmer_id}`);
+              return {
+                milkType: col.channel?.toLowerCase() === 'buffalo' ? 'buffalo' : col.channel?.toLowerCase() === 'mixed' ? 'mixed' : 'cow',
+                fat: parseFloat(col.fat) || 0, snf: parseFloat(col.snf) || 0, clr: parseFloat(col.clr) || 0,
+                protein: parseFloat(col.protein) || 0, lactose: parseFloat(col.lactose) || 0,
+                salt: parseFloat(col.salt) || 0, water: parseFloat(col.water) || 0,
+                temperature: parseFloat(col.temperature) || 0, farmerId: col.farmer_id?.toString() || '0',
+                quantity: parseFloat(col.quantity) || 0, totalAmount: parseFloat(col.total_amount) || 0,
+                rate: parseFloat(col.rate) || 0, incentive: parseFloat(col.bonus) || 0,
+                machineId: col.machine_id, timestamp: new Date(col.collection_date + ' ' + (col.collection_time || '00:00:00')),
+                shift: col.session === 'MO' ? 'MR' : 'EV',
+              };
+            });
+          
+          console.log(`API Debug - Filtered ${allMachineCollections.length} collections for machine ${machineId}`);
+
+          // Filter today's collections for fresh stats
+          const todayCollections = allMachineCollections.filter((col: MilkReading) => {
+            const colDate = new Date(col.timestamp); 
+            colDate.setHours(0, 0, 0, 0);
+            return colDate.getTime() === today.getTime();
+          });
+
+          // Intelligent history merging: combine fresh API data with cached historical data
+          let combinedHistory: MilkReading[] = [];
+          
+          if (cachedHistory && cachedHistory.length > 0) {
+            // Use cached historical data and add any new readings from API
+            const cachedTimestamps = new Set(cachedHistory.map((r: MilkReading) => r.timestamp.getTime()));
+            const newReadings = allMachineCollections.filter((r: MilkReading) => !cachedTimestamps.has(r.timestamp.getTime()));
+            
+            combinedHistory = [...cachedHistory, ...newReadings]
+              .sort((a: MilkReading, b: MilkReading) => a.timestamp.getTime() - b.timestamp.getTime())
+              .slice(-MAX_HISTORY_POINTS);
+              
+            console.log(`Cache Debug - Merged ${cachedHistory.length} cached + ${newReadings.length} new = ${combinedHistory.length} total readings for machine ${normalizedId}`);
+          } else {
+            // No cached data, use API data from last 7 days
+            const sevenDaysAgo = new Date(); 
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+            sevenDaysAgo.setHours(0, 0, 0, 0);
+            
+            combinedHistory = allMachineCollections
+              .filter((col: MilkReading) => {
+                const colDate = new Date(col.timestamp); 
+                colDate.setHours(0, 0, 0, 0);
+                return colDate.getTime() >= sevenDaysAgo.getTime();
+              })
+              .sort((a: MilkReading, b: MilkReading) => a.timestamp.getTime() - b.timestamp.getTime())
+              .slice(-MAX_HISTORY_POINTS);
+              
+            console.log(`Cache Debug - No cache found, using ${combinedHistory.length} fresh readings from last 7 days for machine ${normalizedId}`);
+          }
+          // Update machine reading history with combined data
+          if (combinedHistory.length > 0) {
+            console.log(`Cache Debug - Updating history for machine ${normalizedId} with ${combinedHistory.length} readings`);
             setMachineReadingHistory(prev => {
               const newHistory = new Map(prev);
-              newHistory.set(normalizedId, machineCollections.slice(-MAX_HISTORY_POINTS));
+              newHistory.set(normalizedId, combinedHistory);
               return newHistory;
             });
+          } else {
+            // Fallback: try to get any historical data for this machine
+            console.log(`Cache Debug - No recent data, checking for any historical data for machine ${machineId}`);
+            const anyMachineData = result.filter((col: any) => col.machine_id === machineId);
+            
+            if (anyMachineData.length > 0) {
+              console.log(`Cache Debug - Found ${anyMachineData.length} total records for machine ${machineId}`);
+              const fallbackData = anyMachineData
+                .slice(-MAX_HISTORY_POINTS)
+                .map((col: any): MilkReading => ({
+                  milkType: col.channel?.toLowerCase() === 'buffalo' ? 'buffalo' : col.channel?.toLowerCase() === 'mixed' ? 'mixed' : 'cow',
+                  fat: parseFloat(col.fat) || 0, snf: parseFloat(col.snf) || 0, clr: parseFloat(col.clr) || 0,
+                  protein: parseFloat(col.protein) || 0, lactose: parseFloat(col.lactose) || 0,
+                  salt: parseFloat(col.salt) || 0, water: parseFloat(col.water) || 0,
+                  temperature: parseFloat(col.temperature) || 0, farmerId: col.farmer_id?.toString() || '0',
+                  quantity: parseFloat(col.quantity) || 0, totalAmount: parseFloat(col.total_amount) || 0,
+                  rate: parseFloat(col.rate) || 0, incentive: parseFloat(col.bonus) || 0,
+                  machineId: col.machine_id, timestamp: new Date(col.collection_date + ' ' + (col.collection_time || '00:00:00')),
+                  shift: col.session === 'MO' ? 'MR' : 'EV',
+                }))
+                .sort((a: MilkReading, b: MilkReading) => a.timestamp.getTime() - b.timestamp.getTime());
+              
+              setMachineReadingHistory(prev => {
+                const newHistory = new Map(prev);
+                newHistory.set(normalizedId, fallbackData);
+                return newHistory;
+              });
+            }
           }
-          calculateTodayStats(machineCollections);
+          
+          // Always calculate fresh today's stats from API data
+          calculateTodayStats(todayCollections);
+          console.log(`Cache Debug - Updated today's stats with ${todayCollections.length} today's readings`);
+        } else {
+          console.error(`API Debug - Response is not an array, type: ${typeof result}`);
         }
+      } else {
+        console.error(`API Debug - API request failed with status ${response.status}`);
+        const errorText = await response.text();
+        console.error(`API Debug - Error response: ${errorText.substring(0, 200)}`);
       }
-    } catch {}
-  };
-
-  // Calculate statistics
-  const calculateTodayStats = (readings: MilkReading[]) => {
-    if (readings.length === 0) {
-      setTodayStats({ totalTests: 0, totalQuantity: 0, totalAmount: 0, avgFat: 0, avgSnf: 0, highestFat: 0, lowestFat: 0, highestSnf: 0, lowestSnf: 0 });
-      return;
+    } catch (error) {
+      console.error('API Debug - Exception fetching machine readings:', error);
     }
-    let sumFat = 0, sumSnf = 0, sumQuantity = 0, sumAmount = 0;
-    let maxFat = 0, minFat = Infinity, maxSnf = 0, minSnf = Infinity;
-    readings.forEach(r => {
-      sumFat += r.fat; sumSnf += r.snf; sumQuantity += r.quantity; sumAmount += r.totalAmount;
-      maxFat = Math.max(maxFat, r.fat); minFat = Math.min(minFat, r.fat);
-      maxSnf = Math.max(maxSnf, r.snf); minSnf = Math.min(minSnf, r.snf);
-    });
-    setTodayStats({
-      totalTests: readings.length, totalQuantity: sumQuantity, totalAmount: sumAmount,
-      avgFat: sumFat / readings.length, avgSnf: sumSnf / readings.length,
-      highestFat: maxFat, lowestFat: minFat === Infinity ? 0 : minFat,
-      highestSnf: maxSnf, lowestSnf: minSnf === Infinity ? 0 : minSnf,
-    });
   };
 
-  // Build test command matching Flutter format exactly
-  // Format: 40 0B 07 [channel] [cycleMode] [farmerID_MSB] [farmerID_MID] [farmerID_LSB] [weight3] [weight2] [weight1] [weight0] [LRC]
+  // Build test command (matching Flutter)
   const buildTestCommand = (channel: string, farmerId: string, weight: number): string => {
-    // Channel byte: CH1 (Cow) = 0x00, CH2 (Buffalo) = 0x01, CH3 (Mixed) = 0x02
     let channelByte: number;
     switch (channel) {
       case 'CH1': channelByte = 0x00; break;
@@ -638,153 +858,71 @@ export default function ControlPanelDialog({ isOpen, onClose, machineDbId, initi
       case 'CH3': channelByte = 0x02; break;
       default: channelByte = 0x00;
     }
-
-    // Cycle mode (default to 0x00)
     const cycleMode = 0x00;
-
-    // Convert farmer ID to integer and then to 3 bytes (Big-Endian)
     const farmerIdInt = parseInt(farmerId) || 1;
     const farmerIdMsb = (farmerIdInt >> 16) & 0xFF;
     const farmerIdMid = (farmerIdInt >> 8) & 0xFF;
     const farmerIdLsb = farmerIdInt & 0xFF;
-
-    // Convert weight to 4 bytes (multiply by 100, then Big-Endian)
     const weightInt = Math.round(weight * 100);
     const weightByte3 = (weightInt >> 24) & 0xFF;
     const weightByte2 = (weightInt >> 16) & 0xFF;
     const weightByte1 = (weightInt >> 8) & 0xFF;
     const weightByte0 = weightInt & 0xFF;
-
-    // Build command bytes
-    const bytes = [
-      0x40,         // Header
-      0x0B,         // Number of bytes (11)
-      0x07,         // Command: Test
-      channelByte,  // Channel
-      cycleMode,    // Cycle mode
-      farmerIdMsb,  // Farmer ID MSB
-      farmerIdMid,  // Farmer ID MID
-      farmerIdLsb,  // Farmer ID LSB
-      weightByte3,  // Weight byte 3 (MSB)
-      weightByte2,  // Weight byte 2
-      weightByte1,  // Weight byte 1
-      weightByte0,  // Weight byte 0 (LSB)
-    ];
-
-    // Calculate LRC (XOR of all bytes)
+    const bytes = [0x40, 0x0B, 0x07, channelByte, cycleMode, farmerIdMsb, farmerIdMid, farmerIdLsb, weightByte3, weightByte2, weightByte1, weightByte0];
     let lrc = 0;
     bytes.forEach(b => lrc ^= b);
     bytes.push(lrc);
-
-    // Convert to hex string
-    const hexCommand = bytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join('');
-    console.log(`🔧 [Test Command] Channel: ${channel}, Farmer ID: ${farmerIdInt}, Weight: ${weight}kg`);
-    console.log(`🔧 [Test Command] Hex: ${hexCommand}`);
-    
-    return hexCommand;
+    return bytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join('');
   };
 
-  // Initialize test flow - check modes and show dialogs if needed
   const initiateTest = async () => {
-    if (connectedBLEMachines.size === 0) {
-      setError('No machines connected');
-      return;
-    }
-
+    if (connectedBLEMachines.size === 0) { setError('No machines connected'); return; }
     const machineIds = Array.from(connectedBLEMachines.keys());
-    
-    // Clear stored farmer IDs and weights for new test
     setMachineFarmerIds(new Map());
     setMachineWeights(new Map());
-
-    // Check which machines need manual farmer ID input (default is Manual = false)
     const manualFarmerIdMachines = machineIds.filter(id => !(machineFarmerIdMode.get(id) ?? false));
-    
-    // Check which machines need manual weight input (default is Auto = true)
-    const manualWeightMachines = machineIds.filter(id => !(machineWeighingScaleMode.get(id) ?? true));
-
+    const manualWeightMachines = machineIds.filter(id => !(machineWeighingScaleMode.get(id) ?? false));
     setPendingTestMachines(machineIds);
-
-    // If any machine needs manual Farmer ID, show dialog
-    if (manualFarmerIdMachines.length > 0) {
-      setShowFarmerIdDialog(true);
-      return;
-    }
-
-    // If any machine needs manual Weight, show dialog
-    if (manualWeightMachines.length > 0) {
-      setShowWeightDialog(true);
-      return;
-    }
-
-    // All machines are in Auto mode, proceed with test
+    if (manualFarmerIdMachines.length > 0) { setShowFarmerIdDialog(true); return; }
+    if (manualWeightMachines.length > 0) { setShowWeightDialog(true); return; }
     await executeTest(machineIds);
   };
 
-  // Execute the actual test after dialogs are completed
   const executeTest = async (machineIds: string[], farmerIds?: Map<string, string>, weights?: Map<string, string>) => {
-    // Use passed values or fall back to state (which might be empty for Auto mode)
     const finalFarmerIds = farmerIds || machineFarmerIds;
     const finalWeights = weights || machineWeights;
-    
-    // Clear previous test state (matching Flutter)
     setMachinesWithDataReceived(new Set());
     setCurrentTestMachines(machineIds);
-    
     setIsTestRunning(true);
     setTestElapsedSeconds(0);
     testTimerRef.current = setInterval(() => setTestElapsedSeconds(s => s + 1), 1000);
-
-    console.log(`🧪 [Test] Starting test for ${machineIds.length} machine(s):`, machineIds);
-
-    // Send test command to all machines - use first machine's values since SENDHEXALL broadcasts to all
     if (machineIds.length > 0) {
       const firstMachineId = machineIds[0];
       const farmerId = finalFarmerIds.get(firstMachineId) || '1';
       const weight = parseFloat(finalWeights.get(firstMachineId) || '1') || 1;
       const testHex = buildTestCommand(selectedChannel, farmerId, weight);
-      
-      console.log(`🔧 [Test] Using Farmer ID: ${farmerId}, Weight: ${weight}kg, Channel: ${selectedChannel}`);
-      
-      // Send to all machines using SENDHEXALL
-      if (sendDongleCommand) {
-        await sendDongleCommand(`SENDHEXALL,${testHex}`);
-      }
+      if (sendDongleCommand) await sendDongleCommand(`SENDHEXALL,${testHex}`);
     }
-    
     setSuccess(`Test sent to ${connectedBLEMachines.size} machine(s)!`);
   };
 
-  // Handle farmer ID dialog completion
   const handleFarmerIdDialogComplete = (farmerIds: Map<string, string>) => {
     setMachineFarmerIds(farmerIds);
-    pendingFarmerIdsRef.current = farmerIds; // Store in ref for use in weight dialog
+    pendingFarmerIdsRef.current = farmerIds;
     setShowFarmerIdDialog(false);
-
-    // Check if weight dialog is needed
     const machineIds = Array.from(connectedBLEMachines.keys());
-    const manualWeightMachines = machineIds.filter(id => !(machineWeighingScaleMode.get(id) ?? true));
-
-    if (manualWeightMachines.length > 0) {
-      // Store farmer IDs and show weight dialog
-      setShowWeightDialog(true);
-    } else {
-      // No weight dialog needed, execute with farmer IDs and default weights
-      executeTest(pendingTestMachines, farmerIds, new Map());
-    }
+    const manualWeightMachines = machineIds.filter(id => !(machineWeighingScaleMode.get(id) ?? false));
+    if (manualWeightMachines.length > 0) { setShowWeightDialog(true); }
+    else { executeTest(pendingTestMachines, farmerIds, new Map()); }
   };
 
-  // Handle weight dialog completion
   const handleWeightDialogComplete = (weights: Map<string, string>) => {
     setMachineWeights(weights);
     setShowWeightDialog(false);
-    // Use farmer IDs from ref (set in handleFarmerIdDialogComplete)
     executeTest(pendingTestMachines, pendingFarmerIdsRef.current, weights);
   };
 
-  const handleTest = async () => {
-    await initiateTest();
-  };
+  const handleTest = async () => { await initiateTest(); };
 
   const handleStopTest = () => {
     setIsTestRunning(false);
@@ -808,86 +946,83 @@ export default function ControlPanelDialog({ isOpen, onClose, machineDbId, initi
     if (sent) setSuccess(`Clean sent to ${connectedBLEMachines.size} machine(s)!`);
   };
 
-  // Computed reading history for current machine (matching Flutter's _currentReadingHistory getter)
   const readingHistory = useMemo((): MilkReading[] => {
-    // First try to get history for selected machine
     if (selectedMachineId && machineReadingHistory.has(selectedMachineId)) {
-      return machineReadingHistory.get(selectedMachineId)!;
+      const history = machineReadingHistory.get(selectedMachineId)!;
+      console.log(`Trend Debug - Selected machine ${selectedMachineId} history:`, history.length, 'readings');
+      return history;
     }
-    // If selected machine doesn't have history, try to find any machine with history
-    for (const [, readings] of machineReadingHistory) {
-      if (readings.length > 0) return readings;
+    for (const [machineId, readings] of machineReadingHistory) { 
+      if (readings.length > 0) {
+        console.log(`Trend Debug - Fallback machine ${machineId} history:`, readings.length, 'readings');
+        return readings;
+      }
     }
+    console.log('Trend Debug - No readings found in any machine history');
     return [];
   }, [selectedMachineId, machineReadingHistory]);
 
-  // History navigation
-  const goToPreviousReading = () => {
-    if (historyIndex < readingHistory.length - 1) {
-      setHistoryIndex(h => h + 1);
-      setIsViewingHistory(true);
-    }
-  };
+  const goToPreviousReading = () => { if (historyIndex < readingHistory.length - 1) { setHistoryIndex(h => h + 1); setIsViewingHistory(true); } };
+  const goToNextReading = () => { if (historyIndex > 0) { setHistoryIndex(h => h - 1); if (historyIndex - 1 === 0) setIsViewingHistory(false); } };
+  const goToLiveReading = () => { setHistoryIndex(0); setIsViewingHistory(false); };
 
-  const goToNextReading = () => {
-    if (historyIndex > 0) {
-      setHistoryIndex(h => h - 1);
-      if (historyIndex - 1 === 0) setIsViewingHistory(false);
-    }
-  };
-
-  const goToLiveReading = () => {
-    setHistoryIndex(0);
-    setIsViewingHistory(false);
-  };
-
-  // Displayed reading
   const displayedReading = useMemo(() => {
     if (isViewingHistory && readingHistory.length > 0) {
       const idx = readingHistory.length - 1 - historyIndex;
       return readingHistory[Math.max(0, Math.min(idx, readingHistory.length - 1))] || emptyReading;
     }
-    if (selectedMachineId && machineReadings.has(selectedMachineId)) {
-      return machineReadings.get(selectedMachineId)!;
-    }
+    if (selectedMachineId && machineReadings.has(selectedMachineId)) return machineReadings.get(selectedMachineId)!;
     return emptyReading;
   }, [isViewingHistory, readingHistory, historyIndex, selectedMachineId, machineReadings]);
 
-  // Format functions
   const formatFarmerId = (id: string) => id.replace(/^0+/, '') || '0';
-  const formatTimestamp = (date?: Date) => {
+  const formatTimestamp = (date?: Date | string | number) => {
     if (!date) return '--';
+    
+    // Convert to Date object if it's not already
+    let dateObj: Date;
+    if (date instanceof Date) {
+      dateObj = date;
+    } else if (typeof date === 'string' || typeof date === 'number') {
+      dateObj = new Date(date);
+    } else {
+      return '--';
+    }
+    
+    // Check if the date is valid
+    if (isNaN(dateObj.getTime())) return '--';
+    
     const now = new Date();
-    const isToday = date.toDateString() === now.toDateString();
-    const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-    return isToday ? `Today ${timeStr}` : `${date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' })} ${timeStr}`;
+    const isToday = dateObj.toDateString() === now.toDateString();
+    const timeStr = dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return isToday ? `Today ${timeStr}` : `${dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' })} ${timeStr}`;
   };
   const getTodayDateString = () => new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const formatMachineId = (machineId: string) => machineId.replace(/^0+/, '') || '0';
 
-  // Initial load
+  // Quality score calculation (0-1000)
+  const qualityScore = useMemo(() => {
+    const r = displayedReading;
+    if (r.fat === 0 && r.snf === 0) return 0;
+    const fatScore = Math.min(r.fat / 6, 1) * 333;
+    const snfScore = Math.min(r.snf / 10, 1) * 333;
+    const clrScore = Math.min(r.clr / 35, 1) * 334;
+    return Math.round(fatScore + snfScore + clrScore);
+  }, [displayedReading]);
+
+  const qualityRating = qualityScore >= 700 ? 'Excellent' : qualityScore >= 500 ? 'Good' : qualityScore >= 300 ? 'Average' : qualityScore > 0 ? 'Low' : 'No Data';
+
   useEffect(() => {
-    if (isOpen && machineDbId) {
-      fetchMachineDetails();
-    }
+    if (isOpen && machineDbId) fetchMachineDetails();
     return () => { if (testTimerRef.current) clearInterval(testTimerRef.current); };
   }, [isOpen, machineDbId, fetchMachineDetails]);
 
-  // Handle escape key
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) {
-        if (showFarmerIdDialog) {
-          setShowFarmerIdDialog(false);
-          return;
-        }
-        if (showWeightDialog) {
-          setShowWeightDialog(false);
-          return;
-        }
-        if (showSettingsPanel) {
-          setShowSettingsPanel(false);
-          return;
-        }
+        if (showFarmerIdDialog) { setShowFarmerIdDialog(false); return; }
+        if (showWeightDialog) { setShowWeightDialog(false); return; }
+        if (showSettingsPanel) { setShowSettingsPanel(false); return; }
         onClose();
       }
     };
@@ -895,103 +1030,142 @@ export default function ControlPanelDialog({ isOpen, onClose, machineDbId, initi
     return () => window.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose, showFarmerIdDialog, showWeightDialog, showSettingsPanel]);
 
-  // Format machine ID (remove leading zeros)
-  const formatMachineId = (machineId: string) => {
-    return machineId.replace(/^0+/, '') || '0';
-  };
-
   if (!mounted || !isOpen) return null;
 
-  // Farmer ID Dialog Component
+  // ============================================
+  // Custom Input Component
+  // ============================================
+  const CustomInput = ({ 
+    value, 
+    onChange, 
+    onKeyDown, 
+    placeholder, 
+    autoFocus, 
+    type = "text",
+    step,
+    dataAttribute 
+  }: {
+    value: string;
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+    placeholder: string;
+    autoFocus?: boolean;
+    type?: string;
+    step?: string;
+    dataAttribute?: string;
+  }) => {
+    const inputStyle = {
+      width: '100%',
+      paddingLeft: '2.75rem',
+      paddingRight: type === 'number' && step ? '3rem' : '1rem',
+      paddingTop: '0.75rem',
+      paddingBottom: '0.75rem',
+      borderRadius: '0.75rem',
+      fontSize: '0.875rem',
+      border: isDark ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgb(209, 213, 219)',
+      backgroundColor: isDark ? 'rgb(31, 41, 55)' : 'rgb(255, 255, 255)',
+      color: isDark ? 'rgb(255, 255, 255)' : 'rgb(17, 24, 39)',
+      outline: 'none',
+      transition: 'all 0.15s ease-in-out',
+      caretColor: isDark ? 'rgb(255, 255, 255)' : 'rgb(17, 24, 39)'
+    };
+
+    const focusStyle = isDark 
+      ? {
+          borderColor: 'rgb(52, 211, 153)',
+          boxShadow: '0 0 0 2px rgba(52, 211, 153, 0.2)'
+        }
+      : {
+          borderColor: 'rgb(16, 185, 129)',
+          boxShadow: '0 0 0 2px rgba(16, 185, 129, 0.1)'
+        };
+
+    const hoverStyle = isDark
+      ? { backgroundColor: 'rgb(55, 65, 81)' }
+      : { backgroundColor: 'rgb(249, 250, 251)' };
+
+    return (
+      <input
+        type={type}
+        step={step}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        value={value}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        {...(dataAttribute ? { [dataAttribute.split('=')[0]]: dataAttribute.split('=')[1] } : {})}
+        style={inputStyle}
+        onFocus={(e) => {
+          Object.assign((e.target as HTMLInputElement).style, focusStyle);
+        }}
+        onBlur={(e) => {
+          (e.target as HTMLInputElement).style.borderColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgb(209, 213, 219)';
+          (e.target as HTMLInputElement).style.boxShadow = 'none';
+        }}
+        onMouseEnter={(e) => {
+          if (document.activeElement !== e.target) {
+            Object.assign((e.target as HTMLInputElement).style, hoverStyle);
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (document.activeElement !== e.target) {
+            (e.target as HTMLInputElement).style.backgroundColor = isDark ? 'rgb(31, 41, 55)' : 'rgb(255, 255, 255)';
+          }
+        }}
+      />
+    );
+  };
+
+  // ============================================
+  // Sub-Dialogs (Farmer ID, Weight, Settings)
+  // ============================================
   const FarmerIdDialog = () => {
     const machineIds = Array.from(connectedBLEMachines.keys()).filter(id => !(machineFarmerIdMode.get(id) ?? false));
     const [tempFarmerIds, setTempFarmerIds] = useState<Map<string, string>>(new Map());
-    
     const allFilled = machineIds.every(id => (tempFarmerIds.get(id) || '').trim() !== '');
-    const hasManualWeight = machineIds.some(id => !(machineWeighingScaleMode.get(id) ?? true));
-    
-    const handleSubmit = () => {
-      if (allFilled) {
-        handleFarmerIdDialogComplete(tempFarmerIds);
-      }
-    };
-
+    const hasManualWeight = machineIds.some(id => !(machineWeighingScaleMode.get(id) ?? false));
+    const handleSubmit = () => { if (allFilled) handleFarmerIdDialogComplete(tempFarmerIds); };
     return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      >
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.9, opacity: 0 }}
-          className="bg-gray-800 rounded-2xl border border-white/20 shadow-2xl w-full max-w-md mx-4 overflow-hidden"
-        >
-          {/* Header */}
-          <div className="flex items-center gap-3 p-4 border-b border-white/10 bg-emerald-500/10">
-            <div className="p-2 rounded-xl bg-emerald-500/20">
-              <User className="w-6 h-6 text-emerald-400" />
-            </div>
-            <h3 className="text-lg font-bold text-white">Enter Farmer IDs</h3>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+          className="rounded-2xl border border-gray-300 dark:border-white/10 shadow-2xl w-full max-w-md mx-4 overflow-hidden bg-white dark:bg-gray-900">
+          <div className="flex items-center gap-3 p-5 border-b border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-gray-800/50">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-200 dark:bg-emerald-500/20"><User className="w-5 h-5 text-gray-700 dark:text-emerald-400" /></div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Enter Farmer IDs</h3>
           </div>
-
-          {/* Content */}
-          <div className="p-4 space-y-4 max-h-[60vh] overflow-auto">
+          <div className="p-5 space-y-4 max-h-[60vh] overflow-auto">
             {machineIds.map((machineId, index) => (
               <div key={machineId} className="space-y-2">
-                <label className="text-sm font-semibold text-white/70">
-                  Machine M-{formatMachineId(machineId)}
-                </label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Machine M-{formatMachineId(machineId)}</label>
                 <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-400" />
-                  <input
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-emerald-400/60 z-10" />
+                  <CustomInput
                     type="number"
                     placeholder="Enter Farmer ID"
                     autoFocus={index === 0}
                     value={tempFarmerIds.get(machineId) || ''}
-                    onChange={(e) => {
-                      const newMap = new Map(tempFarmerIds);
-                      newMap.set(machineId, e.target.value);
-                      setTempFarmerIds(newMap);
-                    }}
+                    onChange={(e) => { const m = new Map(tempFarmerIds); m.set(machineId, e.target.value); setTempFarmerIds(m); }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
-                        if (index < machineIds.length - 1) {
-                          // Focus next input
-                          const nextInput = document.querySelector(`input[data-machine="${machineIds[index + 1]}"]`) as HTMLInputElement;
-                          nextInput?.focus();
-                        } else if (allFilled) {
-                          handleSubmit();
-                        }
+                        if (index < machineIds.length - 1) (document.querySelector(`input[data-machine="${machineIds[index + 1]}"]`) as HTMLInputElement)?.focus();
+                        else if (allFilled) handleSubmit();
                       }
                     }}
-                    data-machine={machineId}
-                    className="w-full pl-11 pr-4 py-3 bg-gray-700/50 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all"
+                    dataAttribute={`data-machine=${machineId}`}
                   />
                 </div>
               </div>
             ))}
           </div>
-
-          {/* Actions */}
-          <div className="flex gap-3 p-4 border-t border-white/10 bg-gray-900/50">
-            <button
-              onClick={() => setShowFarmerIdDialog(false)}
-              className="flex-1 py-3 px-4 rounded-xl border border-white/20 text-white/70 hover:bg-white/5 transition-colors font-medium"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={!allFilled}
-              className={`flex-1 py-3 px-4 rounded-xl font-bold transition-all ${
-                allFilled
-                  ? 'bg-emerald-500 text-white hover:bg-emerald-600'
-                  : 'bg-gray-600 text-white/40 cursor-not-allowed'
-              }`}
-            >
+          <div className="flex gap-3 p-5 border-t border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-gray-800/50">
+            <button onClick={() => setShowFarmerIdDialog(false)} className="flex-1 py-3 rounded-xl border border-gray-300 dark:border-white/10 text-gray-700 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors font-medium">Cancel</button>
+            <button onClick={handleSubmit} disabled={!allFilled}
+              className={`flex-1 py-3 rounded-xl font-semibold transition-all ${
+                allFilled 
+                  ? 'bg-emerald-500 dark:bg-emerald-600 text-white hover:bg-emerald-600 dark:hover:bg-emerald-700' 
+                  : 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+              }`}>
               {hasManualWeight ? 'Next' : 'Start Test'}
             </button>
           </div>
@@ -1000,96 +1174,54 @@ export default function ControlPanelDialog({ isOpen, onClose, machineDbId, initi
     );
   };
 
-  // Weight Dialog Component
   const WeightDialog = () => {
-    const machineIds = Array.from(connectedBLEMachines.keys()).filter(id => !(machineWeighingScaleMode.get(id) ?? true));
+    const machineIds = Array.from(connectedBLEMachines.keys()).filter(id => !(machineWeighingScaleMode.get(id) ?? false));
     const [tempWeights, setTempWeights] = useState<Map<string, string>>(new Map());
-    
     const allFilled = machineIds.every(id => (tempWeights.get(id) || '').trim() !== '');
-    
-    const handleSubmit = () => {
-      if (allFilled) {
-        handleWeightDialogComplete(tempWeights);
-      }
-    };
-
+    const handleSubmit = () => { if (allFilled) handleWeightDialogComplete(tempWeights); };
     return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      >
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.9, opacity: 0 }}
-          className="bg-gray-800 rounded-2xl border border-white/20 shadow-2xl w-full max-w-md mx-4 overflow-hidden"
-        >
-          {/* Header */}
-          <div className="flex items-center gap-3 p-4 border-b border-white/10 bg-cyan-500/10">
-            <div className="p-2 rounded-xl bg-cyan-500/20">
-              <Scale className="w-6 h-6 text-cyan-400" />
-            </div>
-            <h3 className="text-lg font-bold text-white">Enter Weights</h3>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+          className="rounded-2xl border border-gray-300 dark:border-white/10 shadow-2xl w-full max-w-md mx-4 overflow-hidden bg-white dark:bg-gray-900">
+          <div className="flex items-center gap-3 p-5 border-b border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-gray-800/50">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-100 dark:bg-cyan-500/20"><Scale className="w-5 h-5 text-gray-700 dark:text-cyan-400" /></div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Enter Weights</h3>
           </div>
-
-          {/* Content */}
-          <div className="p-4 space-y-4 max-h-[60vh] overflow-auto">
+          <div className="p-5 space-y-4 max-h-[60vh] overflow-auto">
             {machineIds.map((machineId, index) => (
               <div key={machineId} className="space-y-2">
-                <label className="text-sm font-semibold text-white/70">
-                  Machine M-{formatMachineId(machineId)}
-                </label>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Machine M-{formatMachineId(machineId)}</label>
                 <div className="relative">
-                  <Scale className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-cyan-400" />
-                  <input
+                  <Scale className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-700 dark:text-cyan-400/60 z-10" />
+                  <CustomInput
                     type="number"
                     step="0.01"
                     placeholder="Enter Weight"
                     autoFocus={index === 0}
                     value={tempWeights.get(machineId) || ''}
-                    onChange={(e) => {
-                      const newMap = new Map(tempWeights);
-                      newMap.set(machineId, e.target.value);
-                      setTempWeights(newMap);
-                    }}
+                    onChange={(e) => { const m = new Map(tempWeights); m.set(machineId, e.target.value); setTempWeights(m); }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
-                        if (index < machineIds.length - 1) {
-                          const nextInput = document.querySelector(`input[data-weight-machine="${machineIds[index + 1]}"]`) as HTMLInputElement;
-                          nextInput?.focus();
-                        } else if (allFilled) {
-                          handleSubmit();
-                        }
+                        if (index < machineIds.length - 1) (document.querySelector(`input[data-weight-machine="${machineIds[index + 1]}"]`) as HTMLInputElement)?.focus();
+                        else if (allFilled) handleSubmit();
                       }
                     }}
-                    data-weight-machine={machineId}
-                    className="w-full pl-11 pr-12 py-3 bg-gray-700/50 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition-all"
+                    dataAttribute={`data-weight-machine=${machineId}`}
                   />
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-white/50 font-medium">kg</span>
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-600 dark:text-gray-400 font-medium z-10">kg</span>
                 </div>
               </div>
             ))}
           </div>
-
-          {/* Actions */}
-          <div className="flex gap-3 p-4 border-t border-white/10 bg-gray-900/50">
-            <button
-              onClick={() => setShowWeightDialog(false)}
-              className="flex-1 py-3 px-4 rounded-xl border border-white/20 text-white/70 hover:bg-white/5 transition-colors font-medium"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={!allFilled}
-              className={`flex-1 py-3 px-4 rounded-xl font-bold transition-all ${
-                allFilled
-                  ? 'bg-cyan-500 text-white hover:bg-cyan-600'
-                  : 'bg-gray-600 text-white/40 cursor-not-allowed'
-              }`}
-            >
+          <div className="flex gap-3 p-5 border-t border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-gray-800/50">
+            <button onClick={() => setShowWeightDialog(false)} className="flex-1 py-3 rounded-xl border border-gray-300 dark:border-white/10 text-gray-700 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors font-medium">Cancel</button>
+            <button onClick={handleSubmit} disabled={!allFilled}
+              className={`flex-1 py-3 rounded-xl font-semibold transition-all ${
+                allFilled 
+                  ? 'bg-emerald-500 dark:bg-emerald-600 text-white hover:bg-emerald-600 dark:hover:bg-emerald-700' 
+                  : 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+              }`}>
               Start Test
             </button>
           </div>
@@ -1098,539 +1230,469 @@ export default function ControlPanelDialog({ isOpen, onClose, machineDbId, initi
     );
   };
 
-  // Settings Panel JSX (inlined to prevent re-render issues)
-  const settingsPanelContent = showSettingsPanel && (
-    <motion.div
-      key="settings-panel"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={() => setShowSettingsPanel(false)}
-    >
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="bg-gray-800 rounded-2xl border border-white/20 shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-white/10 bg-purple-500/10">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-purple-500/20">
-              <Settings className="w-6 h-6 text-purple-400" />
-            </div>
-            <h3 className="text-lg font-bold text-white">Test Settings</h3>
-          </div>
-          <button
-            onClick={() => setShowSettingsPanel(false)}
-            className="p-2 hover:bg-white/10 rounded-xl transition-colors"
-          >
-            <X className="w-5 h-5 text-white/60" />
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="p-4 space-y-4 max-h-[60vh] overflow-auto">
-          {/* Per-Machine Settings */}
-          {Array.from(connectedBLEMachines.keys()).map((machineId) => (
-            <div key={machineId} className="bg-gray-900/50 rounded-xl p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <Bluetooth className="w-4 h-4 text-emerald-400" />
-                <span className="font-bold text-white">Machine M-{formatMachineId(machineId)}</span>
-              </div>
-
-              {/* Weighing Scale Mode */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm text-white/70">
-                  <Scale className="w-4 h-4" />
-                  <span>Weighing Scale:</span>
-                </div>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => {
-                      const newMap = new Map(machineWeighingScaleMode);
-                      newMap.set(machineId, true);
-                      setMachineWeighingScaleMode(newMap);
-                    }}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                      machineWeighingScaleMode.get(machineId) ?? true
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                        : 'bg-gray-700/50 text-white/50 hover:bg-gray-700'
-                    }`}
-                  >
-                    Auto
-                  </button>
-                  <button
-                    onClick={() => {
-                      const newMap = new Map(machineWeighingScaleMode);
-                      newMap.set(machineId, false);
-                      setMachineWeighingScaleMode(newMap);
-                    }}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                      !(machineWeighingScaleMode.get(machineId) ?? true)
-                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                        : 'bg-gray-700/50 text-white/50 hover:bg-gray-700'
-                    }`}
-                  >
-                    Manual
-                  </button>
-                </div>
-              </div>
-
-              {/* Farmer ID Mode */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm text-white/70">
-                  <User className="w-4 h-4" />
-                  <span>Farmer ID:</span>
-                </div>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => {
-                      const newMap = new Map(machineFarmerIdMode);
-                      newMap.set(machineId, true);
-                      setMachineFarmerIdMode(newMap);
-                    }}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                      machineFarmerIdMode.get(machineId) ?? false
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                        : 'bg-gray-700/50 text-white/50 hover:bg-gray-700'
-                    }`}
-                  >
-                    Auto
-                  </button>
-                  <button
-                    onClick={() => {
-                      const newMap = new Map(machineFarmerIdMode);
-                      newMap.set(machineId, false);
-                      setMachineFarmerIdMode(newMap);
-                    }}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                      !(machineFarmerIdMode.get(machineId) ?? false)
-                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                        : 'bg-gray-700/50 text-white/50 hover:bg-gray-700'
-                    }`}
-                  >
-                    Manual
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Actions */}
-        <div className="p-4 border-t border-white/10 bg-gray-900/50">
-          <button
-            onClick={() => setShowSettingsPanel(false)}
-            className="w-full py-3 px-4 rounded-xl bg-emerald-500 text-white font-bold hover:bg-emerald-600 transition-all"
-          >
-            Done
-          </button>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-
+  // ============================================
+  // Sidebar Navigation Items
+  // ============================================
+  // Main Render
+  // ============================================
   const dialogContent = (
     <AnimatePresence>
       {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[9999] overflow-hidden"
-          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
-        >
-          {/* Full-screen dialog content */}
-          <motion.div
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="absolute inset-0 bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 overflow-auto"
-          >
-            {/* Ambient Background Effects */}
-            <div className="fixed inset-0 overflow-hidden pointer-events-none">
-              <div className="absolute top-20 left-20 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl" />
-              <div className="absolute bottom-20 right-20 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl" />
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-purple-500/5 rounded-full blur-3xl" />
-            </div>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[9999] overflow-hidden" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
+          <motion.div initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.98, opacity: 0 }}
+            transition={{ duration: 0.25 }} className={`absolute inset-0 flex flex-col ${
+              isDark ? 'bg-gray-950' : 'bg-white'
+            }`}>
 
-            {/* Loading State */}
-            {loading && (
-              <div className="absolute inset-0 flex items-center justify-center z-50 bg-gray-900/80">
-                <div className="flex flex-col items-center gap-6">
-                  <div className="relative">
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-emerald-500 to-cyan-500 opacity-20 animate-pulse" />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="w-16 h-16 border-4 border-emerald-500/30 rounded-full" />
-                      <div className="absolute w-16 h-16 border-4 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+              {/* Top Header Bar */}
+              <header className={`flex items-center justify-between px-6 py-4 border-b ${
+                isDark ? 'border-white/10 bg-gray-900/50' : 'border-gray-200 bg-gray-50'
+              }`}>
+                {/* Left: Welcome */}
+                <div className="flex items-center gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[15px] font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Welcome,</span>
+                      <span className={`text-[15px] font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{machine?.machineName || 'Machine'}</span>
                     </div>
-                  </div>
-                  <div className="text-center">
-                    <h2 className="text-xl font-bold text-white mb-1">Control Panel</h2>
-                    <p className="text-gray-400 text-sm">Initializing dashboard...</p>
+                    <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                      {isViewingHistory ? 'Viewing History' : 'Live monitoring active'} • {getTodayDateString()}
+                    </p>
                   </div>
                 </div>
-              </div>
-            )}
 
-            {/* Header */}
-            <header className="sticky top-0 z-40 backdrop-blur-xl bg-gray-900/80 border-b border-white/10">
-              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex items-center justify-between h-16">
-                  {/* Left */}
-                  <div className="flex items-center gap-4">
-                    <button onClick={onClose} className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 transition-colors">
-                      <X className="w-5 h-5 text-white" />
-                    </button>
-                    <div>
-                      <h1 className="text-lg font-bold text-white flex items-center gap-2">
-                        <Sparkles className="w-5 h-5 text-emerald-400" />
-                        Control Panel
-                      </h1>
-                      <p className="text-xs text-gray-400">{machine?.machineName || 'Loading...'} • {getTodayDateString()}</p>
-                    </div>
-                    {/* Settings Button */}
-                    <button 
-                      onClick={() => setShowSettingsPanel(true)}
-                      className="p-2.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 transition-colors"
-                      title="Test Settings"
-                    >
-                      <Settings className="w-5 h-5 text-purple-400" />
-                    </button>
-                    
-                    {/* Channel Dropdown - matching Flutter's ChannelDropdownButton */}
-                    <div className="relative group">
-                      <button
-                        className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
-                          selectedChannel === 'CH1'
-                            ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-400'
-                            : selectedChannel === 'CH2'
-                            ? 'bg-blue-500/15 border-blue-500/50 text-blue-400'
-                            : 'bg-amber-500/15 border-amber-500/50 text-amber-400'
-                        }`}
-                      >
-                        <span className={`p-1 rounded-lg ${
-                          selectedChannel === 'CH1' ? 'bg-emerald-500/20' : selectedChannel === 'CH2' ? 'bg-blue-500/20' : 'bg-amber-500/20'
+                {/* Right: History / Machine Switcher */}
+                <div className="flex items-center gap-3">
+
+                  {/* History Navigator */}
+                  {readingHistory.length > 1 && (
+                    <div className="hidden sm:flex items-center gap-1.5">
+                      <button onClick={goToPreviousReading} disabled={historyIndex >= readingHistory.length - 1}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 text-gray-700 dark:text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+                      <button onClick={goToLiveReading}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                          isViewingHistory ? 'bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-300 dark:border-white/10' : 'bg-gray-900 dark:bg-violet-500 text-white border border-gray-900 dark:border-violet-500'
                         }`}>
-                          {selectedChannel === 'CH1' ? '🐄' : selectedChannel === 'CH2' ? '🐃' : '🔀'}
-                        </span>
-                        <span className="text-sm font-medium">
-                          {selectedChannel === 'CH1' ? 'Cow' : selectedChannel === 'CH2' ? 'Buffalo' : 'Mixed'}
-                        </span>
-                        <ChevronRight className="w-4 h-4 rotate-90" />
+                        {isViewingHistory ? <span className="flex items-center gap-1"><History className="w-3 h-3" />{historyIndex + 1}/{readingHistory.length}</span> : <span className="flex items-center gap-1"><Activity className="w-3 h-3" />LIVE</span>}
                       </button>
-                      {/* Dropdown Menu */}
-                      <div className="absolute left-0 top-full mt-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-                        <div className="bg-gray-800 rounded-xl border border-white/20 shadow-2xl overflow-hidden min-w-[140px]">
-                          {(['CH1', 'CH2', 'CH3'] as const).map((ch) => (
-                            <button
-                              key={ch}
-                              onClick={() => setSelectedChannel(ch)}
-                              className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                                selectedChannel === ch
-                                  ? ch === 'CH1' ? 'bg-emerald-500/20 text-emerald-400' : ch === 'CH2' ? 'bg-blue-500/20 text-blue-400' : 'bg-amber-500/20 text-amber-400'
-                                  : 'text-white/70 hover:bg-white/5'
-                              }`}
-                            >
-                              <span>{ch === 'CH1' ? '🐄' : ch === 'CH2' ? '🐃' : '🔀'}</span>
-                              <span className="text-sm font-medium">{ch === 'CH1' ? 'Cow' : ch === 'CH2' ? 'Buffalo' : 'Mixed'}</span>
-                              {selectedChannel === ch && <Check className="w-4 h-4 ml-auto" />}
+                      <button onClick={goToNextReading} disabled={historyIndex <= 0}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 text-gray-700 dark:text-gray-400 transition-colors"><ChevronRight className="w-4 h-4" /></button>
+                    </div>
+                  )}
+
+                  {/* Machine Badge */}
+                  <div className="relative group">
+                    <button className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-medium transition-all ${
+                      selectedMachineId && connectedBLEMachines.has(selectedMachineId)
+                        ? 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-white/10 text-gray-900 dark:text-white'
+                        : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-white/5 text-gray-700 dark:text-gray-300'
+                    }`}>
+                      <Bluetooth className="w-3.5 h-3.5" />
+                      <span className="font-bold">M-{selectedMachineId || '--'}</span>
+                      {connectedBLEMachines.size > 1 && <ChevronDown className="w-3.5 h-3.5 opacity-60" />}
+                    </button>
+                    {connectedBLEMachines.size > 1 && (
+                      <div className="absolute right-0 top-full mt-1.5 min-w-[220px] py-2 rounded-xl border border-gray-300 dark:border-white/10 shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 bg-white dark:bg-gray-900">
+                        {Array.from(connectedBLEMachines).map((mId, index) => {
+                          const isSelected = selectedMachineId === mId;
+                          const lastReading = machineReadings.get(mId);
+                          return (
+                            <button key={mId} onClick={() => setSelectedMachineId(mId)}
+                              className={`w-full px-4 py-2.5 flex items-center gap-3 transition-all hover:bg-gray-100 dark:hover:bg-gray-800/50 ${isSelected ? 'bg-gray-100 dark:bg-gray-800' : ''}`}>
+                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${isSelected ? 'bg-gray-900 dark:bg-emerald-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'}`}>{index + 1}</div>
+                              <div className="flex-1 text-left">
+                                <span className={`text-sm font-medium ${isSelected ? 'text-gray-900 dark:text-white' : 'text-gray-700 dark:text-gray-300'}`}>Machine M-{mId}</span>
+                                {lastReading ? <p className="text-[10px] text-gray-600 dark:text-gray-400">FAT: {lastReading.fat.toFixed(1)} | SNF: {lastReading.snf.toFixed(1)}</p>
+                                  : <p className="text-[10px] text-gray-600 dark:text-gray-400">Connected</p>}
+                              </div>
+                              {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-gray-900 dark:bg-emerald-500" />}
                             </button>
-                          ))}
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Close Button */}
+                  <button
+                    onClick={onClose}
+                    className="p-2 rounded-xl border border-gray-300 text-gray-700 hover:text-red-600 hover:bg-red-50 hover:border-red-300 transition-all"
+                    title="Close Control Panel"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </header>
+
+              {/* Status Messages (Snackbar) */}
+              <StatusMessage
+                success={success}
+                error={error}
+                onClose={() => {
+                  setError('');
+                  setSuccess('');
+                }}
+              />
+
+              {/* Loading State */}
+              {loading && (
+                <div className="absolute inset-0 flex items-center justify-center z-50 bg-gray-50/95 dark:bg-gray-950/95">
+                  <div className="flex flex-col items-center gap-5">
+                    <div className="relative">
+                      <div className="w-16 h-16 rounded-full bg-gray-200 animate-pulse" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-12 h-12 border-[3px] border-gray-300 rounded-full" />
+                        <div className="absolute w-12 h-12 border-[3px] border-gray-900 border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Initializing Dashboard</h2>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Loading machine data...</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ===== SCROLLABLE MAIN CONTENT ===== */}
+              <main className="flex-1 overflow-auto p-6 pb-24">
+                <div className="max-w-[1800px] mx-auto h-full">
+                  {/* Maximized Single-Screen Layout */}
+                  <div className="grid grid-cols-12 gap-6 h-full">
+                    {/* Left Column: Readings + Trend */}
+                    <div className="col-span-12 xl:col-span-7 space-y-5 flex flex-col">
+                      {/* Top: Reading Cards */}
+                      <div>
+                        <div className="flex items-center justify-between mb-4">
+                          <h2 className="text-base font-semibold text-gray-900 dark:text-white">Current Readings</h2>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs font-medium ${isViewingHistory ? 'text-gray-700 dark:text-gray-400' : 'text-gray-600 dark:text-gray-400'}`}>{formatTimestamp(displayedReading.timestamp)}</span>
+                            <button onClick={clearCurrentReadingsOnly}
+                              className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors" title="Clear current readings">
+                              <RefreshCw className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 lg:grid-cols-5 gap-4">
+                          <CompactReadingCard icon={<Droplet className="w-6 h-6" />} label="FAT" value={`${displayedReading.fat.toFixed(2)}%`} iconBg="bg-pink-500" />
+                          <CompactReadingCard icon={<Gauge className="w-6 h-6" />} label="SNF" value={`${displayedReading.snf.toFixed(2)}%`} iconBg="bg-orange-500" />
+                          <CompactReadingCard icon={<Beaker className="w-6 h-6" />} label="CLR" value={displayedReading.clr.toFixed(1)} iconBg="bg-violet-500" />
+                          <CompactReadingCard icon={<FlaskConical className="w-6 h-6" />} label="Protein" value={`${displayedReading.protein.toFixed(2)}%`} iconBg="bg-blue-500" />
+                          <CompactReadingCard icon={<Thermometer className="w-6 h-6" />} label="Temp" value={`${displayedReading.temperature.toFixed(1)}°C`} iconBg="bg-teal-500" />
+                        </div>
+                      </div>
+
+                      {/* Quality Score + Composition Combined */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 flex-1">
+                        {/* Quality Score */}
+                        <CompactDashboardCard title="Quality Score">
+                          <CompactQualityGauge score={qualityScore} rating={qualityRating} />
+                        </CompactDashboardCard>
+
+                        {/* Milk Composition */}
+                        <CompactDashboardCard title="Milk Composition">
+                          <CompactCompositionDonut reading={displayedReading} />
+                        </CompactDashboardCard>
+                      </div>
+
+                      {/* Connected Machines Report */}
+                      <CompactDashboardCard title="Connected Machines Report" rightContent={
+                        <span className="text-xs text-gray-600 dark:text-gray-400 px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-gray-800">
+                          {connectedBLEMachines.size} {connectedBLEMachines.size === 1 ? 'machine' : 'machines'}
+                        </span>
+                      }>
+                        <ConnectedMachinesReport 
+                          connectedMachines={connectedBLEMachines} 
+                          machineReadings={machineReadings}
+                          machineReadingHistory={machineReadingHistory}
+                          formatTimestamp={formatTimestamp}
+                          formatFarmerId={formatFarmerId}
+                          selectedMachineId={selectedMachineId}
+                          onSelectMachine={(machineId) => {
+                            const lastReading = machineReadings.get(machineId);
+                            if (lastReading) {
+                              setSelectedMachineId(machineId);
+                            }
+                          }}
+                        />
+                      </CompactDashboardCard>
+                    </div>
+
+                    {/* Right Column: Transaction + Trend + Summary */}
+                    <div className="col-span-12 xl:col-span-5 space-y-5 flex flex-col">
+                      {/* Transaction */}
+                      <CompactDashboardCard title="Transaction">
+                        <div className="space-y-5">
+                          {/* Farmer ID Badge */}
+                          <div className="flex items-center justify-between px-5 py-4 rounded-xl bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800/50 dark:to-gray-800/30 border border-gray-200 dark:border-white/10">
+                            <div className="flex items-center gap-3">
+                              <div className="w-11 h-11 rounded-xl bg-gray-900 dark:bg-emerald-500 flex items-center justify-center">
+                                <User className="w-6 h-6 text-white" />
+                              </div>
+                              <span className="text-sm font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">Farmer ID</span>
+                            </div>
+                            <span className="text-3xl font-bold text-gray-900 dark:text-white tracking-tight">{formatFarmerId(displayedReading.farmerId)}</span>
+                          </div>
+
+                          {/* Calculation Formula */}
+                          <div className="space-y-4">
+                            {/* Formula Display */}
+                            <div className="flex items-center justify-center gap-3 flex-wrap">
+                              {/* Quantity Box */}
+                              <div className="flex flex-col items-center gap-2">
+                                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Quantity</span>
+                                <div className="px-5 py-3.5 rounded-xl bg-cyan-50 dark:bg-cyan-500/10 border-2 border-cyan-200 dark:border-cyan-500/30">
+                                  <span className="text-2xl font-bold text-cyan-700 dark:text-cyan-400">{displayedReading.quantity.toFixed(1)}</span>
+                                  <span className="text-sm font-medium text-cyan-600 dark:text-cyan-400 ml-1">L</span>
+                                </div>
+                              </div>
+
+                              {/* Multiply Symbol */}
+                              <div className="text-3xl font-bold text-gray-400 dark:text-gray-500 mt-8">×</div>
+
+                              {/* Rate + Bonus Group */}
+                              <div className="flex flex-col items-center gap-2">
+                                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Rate + Bonus</span>
+                                <div className="flex items-center gap-2 px-4 py-3.5 rounded-xl bg-violet-50 dark:bg-violet-500/10 border-2 border-violet-200 dark:border-violet-500/30">
+                                  {/* Rate */}
+                                  <div className="flex items-baseline gap-0.5">
+                                    <span className="text-sm text-violet-600 dark:text-violet-400">₹</span>
+                                    <span className="text-xl font-bold text-violet-700 dark:text-violet-400">{displayedReading.rate.toFixed(2)}</span>
+                                  </div>
+                                  
+                                  {/* Plus */}
+                                  <span className="text-lg font-bold text-violet-500 dark:text-violet-400">+</span>
+                                  
+                                  {/* Bonus */}
+                                  <div className="flex items-baseline gap-0.5">
+                                    <span className="text-sm text-amber-600 dark:text-amber-400">₹</span>
+                                    <span className="text-xl font-bold text-amber-700 dark:text-amber-400">{displayedReading.incentive.toFixed(2)}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Equals Symbol */}
+                              <div className="text-3xl font-bold text-gray-400 dark:text-gray-500 mt-8">=</div>
+
+                              {/* Total Box */}
+                              <div className="flex flex-col items-center gap-2">
+                                <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Total</span>
+                                <div className="px-5 py-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border-2 border-emerald-300 dark:border-emerald-500/40">
+                                  <span className="text-sm text-emerald-600 dark:text-emerald-400 mr-0.5">₹</span>
+                                  <span className="text-3xl font-bold text-emerald-700 dark:text-emerald-400">{displayedReading.totalAmount.toFixed(2)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </CompactDashboardCard>
+
+                      {/* Trend Summary */}
+                      <CompactDashboardCard title="Trend Summary" rightContent={
+                        <span className="text-xs text-gray-600 dark:text-gray-400 px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-gray-800">
+                          {readingHistory.length} readings
+                        </span>
+                      }>
+                        <div className="h-56">
+                          {readingHistory.length > 1 ? (
+                            <TrendChartSVG readings={readingHistory} />
+                          ) : (
+                            <div className="flex flex-col items-center justify-center h-full text-gray-600 dark:text-gray-400 space-y-2">
+                              <Waves className="w-8 h-8 opacity-40" />
+                              <span className="text-sm">
+                                {readingHistory.length === 0 
+                                  ? 'No data available'
+                                  : `Need ${2 - readingHistory.length} more reading${2 - readingHistory.length > 1 ? 's' : ''}`
+                                }
+                              </span>
+                              <span className="text-xs opacity-60">
+                                {selectedMachineId ? `Machine M-${selectedMachineId}` : 'No machine selected'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        {process.env.NODE_ENV === 'development' && (
+                          <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-white/10 pt-2 break-words">
+                            <div>Cache: {machineReadingHistory.size} machines, {readingHistory.length} readings</div>
+                            {selectedMachineId && (
+                              <div>M-{selectedMachineId}: {machineReadingHistory.get(selectedMachineId)?.length || 0} cached</div>
+                            )}
+                          </div>
+                        )}
+                      </CompactDashboardCard>
+
+                      {/* Today's Summary */}
+                      {todayStats.totalTests > 0 && (
+                        <CompactDashboardCard title="Today's Summary">
+                          <div className="grid grid-cols-2 gap-4">
+                            <MiniStat label="Total Qty" value={`${todayStats.totalQuantity.toFixed(1)} L`} icon={<Scale className="w-4 h-4" />} />
+                            <MiniStat label="Revenue" value={`₹${todayStats.totalAmount.toFixed(0)}`} icon={<Award className="w-4 h-4" />} />
+                            <MiniStat label="Avg FAT" value={`${todayStats.avgFat.toFixed(2)}%`} icon={<Droplet className="w-4 h-4" />} />
+                            <MiniStat label="Avg SNF" value={`${todayStats.avgSnf.toFixed(2)}%`} icon={<Gauge className="w-4 h-4" />} />
+                          </div>
+                        </CompactDashboardCard>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </main>
+
+              {/* ===== BOTTOM ACTION BAR ===== */}
+              <div className={`flex-shrink-0 border-t px-6 py-3 ${
+                isDark ? 'border-white/10 bg-gray-900/50' : 'border-gray-200 bg-gray-50'
+              }`}>
+                <div className="max-w-xl mx-auto flex items-center gap-3">
+                  {/* Test Button */}
+                  <ActionButton
+                    icon={isTestRunning ? <Timer className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+                    label={isTestRunning ? `Testing ${testElapsedSeconds}s` : 'Test'}
+                    color="violet"
+                    onClick={isTestRunning ? undefined : handleTest}
+                    isActive={isTestRunning}
+                    isPrimary
+                  />
+                  <ActionButton icon={<Check className="w-5 h-5" />} label="OK" color="emerald" onClick={handleOk} />
+                  <ActionButton icon={<X className="w-5 h-5" />} label="Cancel" color="amber" onClick={handleCancel} />
+                  <ActionButton icon={<Droplets className="w-5 h-5" />} label="Clean" color="blue" onClick={handleClean} />
+                  
+                  {/* Channel Selector */}
+                  <div className="relative group">
+                    <button className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-white/10 text-sm font-medium transition-all ${
+                      selectedChannel === 'CH1' 
+                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700'
+                        : selectedChannel === 'CH2' 
+                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700'
+                        : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700'
+                    }`}>
+                      <span>{selectedChannel === 'CH1' ? '🐄' : selectedChannel === 'CH2' ? '🐃' : '🔀'}</span>
+                      <span className="hidden sm:inline">{selectedChannel === 'CH1' ? 'Cow' : selectedChannel === 'CH2' ? 'Buffalo' : 'Mixed'}</span>
+                      <ChevronDown className="w-3.5 h-3.5 opacity-60 group-hover:translate-y-0.5 transition-transform" />
+                    </button>
+
+                    {/* Dropdown Menu */}
+                    <div className="absolute left-0 bottom-full mb-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                      <div className="rounded-2xl border border-gray-300 dark:border-white/10 shadow-2xl overflow-hidden backdrop-blur-xl bg-white dark:bg-gray-900">
+                        <div className="p-2 space-y-1">
+                          {(['CH1', 'CH2', 'CH3'] as const).map((ch) => {
+                            const isSelected = selectedChannel === ch;
+                            const config = ch === 'CH1' 
+                              ? { emoji: '🐄', label: 'Cow', sublabel: 'Channel 1', color: 'emerald' }
+                              : ch === 'CH2'
+                              ? { emoji: '🐃', label: 'Buffalo', sublabel: 'Channel 2', color: 'blue' }
+                              : { emoji: '🔀', label: 'Mixed', sublabel: 'Channel 3', color: 'amber' };
+                            
+                            return (
+                              <button key={ch} onClick={() => setSelectedChannel(ch)}
+                                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all group/item ${
+                                  isSelected
+                                    ? 'bg-gray-100 border border-gray-300 shadow-md'
+                                    : 'hover:bg-gray-50 border border-transparent'
+                                }`}>
+                                {/* Icon */}
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl transition-all ${
+                                  isSelected
+                                    ? 'bg-gray-200'
+                                    : 'bg-gray-100 group-hover/item:bg-gray-200'
+                                }`}>
+                                  {config.emoji}
+                                </div>
+                                
+                                {/* Labels */}
+                                <div className="flex-1 min-w-0">
+                                  <div className={`text-sm font-semibold transition-colors ${
+                                    isSelected
+                                      ? 'text-gray-900 dark:text-white'
+                                      : 'text-gray-700 dark:text-gray-400 group-hover/item:text-gray-900 dark:group-hover/item:text-white'
+                                  }`}>
+                                    {config.label}
+                                  </div>
+                                  <div className="text-[10px] text-gray-600 dark:text-gray-500 uppercase tracking-wider">{config.sublabel}</div>
+                                </div>
+                                
+                                {/* Check Icon */}
+                                {isSelected && (
+                                  <div className="w-5 h-5 rounded-full flex items-center justify-center bg-gray-900">
+                                    <Check className="w-3 h-3 text-white" />
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        
+                        {/* Info Footer */}
+                        <div className="px-4 py-2 border-t border-gray-200 bg-gray-50">
+                          <p className="text-[10px] text-gray-600 text-center">Select milk type for testing</p>
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Center - History Navigator */}
-                  {readingHistory.length > 1 && (
-                    <div className="flex items-center gap-2">
-                      <button onClick={goToPreviousReading} disabled={historyIndex >= readingHistory.length - 1}
-                        className="p-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 transition-colors">
-                        <ChevronLeft className="w-5 h-5 text-white" />
-                      </button>
-                      <button onClick={goToLiveReading}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-                          isViewingHistory
-                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                            : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                        }`}>
-                        {isViewingHistory ? (
-                          <span className="flex items-center gap-2"><History className="w-4 h-4" />{historyIndex + 1}/{readingHistory.length}</span>
-                        ) : (
-                          <span className="flex items-center gap-2"><Activity className="w-4 h-4" />LIVE</span>
-                        )}
-                      </button>
-                      <button onClick={goToNextReading} disabled={historyIndex <= 0}
-                        className="p-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 transition-colors">
-                        <ChevronRight className="w-5 h-5 text-white" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Right - Machine Switcher (Flutter-style) */}
-                  <div className="flex items-center gap-2">
-                    {/* Navigation arrows when multiple machines */}
-                    {connectedBLEMachines.size > 1 && (
-                      <button 
-                        onClick={() => {
-                          const machineIds = Array.from(connectedBLEMachines);
-                          const currentIdx = machineIds.indexOf(selectedMachineId || '');
-                          const prevIdx = currentIdx <= 0 ? machineIds.length - 1 : currentIdx - 1;
-                          setSelectedMachineId(machineIds[prevIdx]);
-                        }}
-                        className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-                      >
-                        <ChevronLeft className="w-5 h-5 text-white" />
-                      </button>
-                    )}
-
-                    {/* Current machine dropdown (Flutter PopupMenuButton style) */}
-                    {connectedBLEMachines.size > 0 ? (
-                      <div className="relative group">
-                        <button 
-                          className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
-                            selectedMachineId && connectedBLEMachines.has(selectedMachineId)
-                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
-                              : 'bg-red-500/15 border-red-500/40 text-red-400'
-                          }`}
-                        >
-                          <Bluetooth className={`w-4 h-4 ${selectedMachineId && connectedBLEMachines.has(selectedMachineId) ? 'text-emerald-400' : 'text-red-400'}`} />
-                          <span className="text-sm font-bold">M-{selectedMachineId || '--'}</span>
-                          {connectedBLEMachines.size > 1 && (
-                            <svg className="w-4 h-4 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          )}
-                        </button>
-                        
-                        {/* Dropdown menu (shows on hover like Flutter PopupMenu) */}
-                        {connectedBLEMachines.size > 1 && (
-                          <div className="absolute right-0 top-full mt-2 min-w-[200px] py-2 rounded-xl bg-gray-800/95 backdrop-blur-xl border border-white/20 shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-                            {Array.from(connectedBLEMachines).map((mId, index) => {
-                              const isSelected = selectedMachineId === mId;
-                              const lastReading = machineReadings.get(mId);
-                              const hasData = !!lastReading;
-                              
-                              return (
-                                <button 
-                                  key={mId}
-                                  onClick={() => setSelectedMachineId(mId)}
-                                  className={`w-full px-4 py-3 flex items-center gap-3 transition-all hover:bg-white/10 ${
-                                    isSelected ? 'bg-emerald-500/15' : ''
-                                  }`}
-                                >
-                                  {/* Serial number badge */}
-                                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border ${
-                                    isSelected 
-                                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' 
-                                      : 'bg-white/10 border-white/20 text-white/60'
-                                  }`}>
-                                    {index + 1}
-                                  </div>
-                                  
-                                  {/* Machine info */}
-                                  <div className="flex-1 text-left">
-                                    <div className="flex items-center gap-2">
-                                      <span className={`text-sm font-bold ${isSelected ? 'text-emerald-400' : 'text-white'}`}>
-                                        Machine M-{mId}
-                                      </span>
-                                      {isSelected && (
-                                        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                                      )}
-                                    </div>
-                                    {hasData ? (
-                                      <span className="text-xs text-cyan-400">
-                                        FAT: {lastReading.fat.toFixed(1)} | SNF: {lastReading.snf.toFixed(1)}
-                                      </span>
-                                    ) : (
-                                      <span className="text-xs text-white/40">Connected</span>
-                                    )}
-                                  </div>
-                                  
-                                  {/* Check mark for selected */}
-                                  {isSelected && (
-                                    <Check className="w-4 h-4 text-emerald-400" />
-                                  )}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/20 text-white/40">
-                        <BluetoothOff className="w-4 h-4" />
-                        <span className="text-sm">No machines</span>
-                      </div>
-                    )}
-
-                    {/* Navigation arrows when multiple machines */}
-                    {connectedBLEMachines.size > 1 && (
-                      <button 
-                        onClick={() => {
-                          const machineIds = Array.from(connectedBLEMachines);
-                          const currentIdx = machineIds.indexOf(selectedMachineId || '');
-                          const nextIdx = currentIdx >= machineIds.length - 1 ? 0 : currentIdx + 1;
-                          setSelectedMachineId(machineIds[nextIdx]);
-                        }}
-                        className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-                      >
-                        <ChevronRight className="w-5 h-5 text-white" />
-                      </button>
-                    )}
-
-                    {/* Dongle Status */}
-                    <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border ${
-                      connectedPort && isDongleVerified
-                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                        : 'bg-slate-500/20 text-slate-400 border-slate-500/40'
-                    }`}>
-                      <Usb className="w-4 h-4" />
-                      <span className="text-sm font-medium">{connectedPort && isDongleVerified ? 'HUB Ready' : 'API Mode'}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </header>
-
-            {/* Toast Messages */}
-            <AnimatePresence>
-              {(error || success) && (
-                <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50">
-                  {error && <Toast type="error" message={error} onClose={() => setError('')} />}
-                  {success && <Toast type="success" message={success} onClose={() => setSuccess('')} />}
-                </div>
-              )}
-            </AnimatePresence>
-
-            {/* Main Content */}
-            <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-32">
-              {/* Channel & Actions Row */}
-              <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-                <div className="flex items-center gap-3">
-                  <select value={selectedChannel} onChange={(e) => setSelectedChannel(e.target.value as 'CH1' | 'CH2' | 'CH3')}
-                    className="px-4 py-2.5 text-sm font-medium rounded-xl bg-white/5 border border-white/10 text-white appearance-none cursor-pointer hover:bg-white/10 transition-colors">
-                    <option value="CH1" className="bg-gray-800">Cow (CH1)</option>
-                    <option value="CH2" className="bg-gray-800">Buffalo (CH2)</option>
-                    <option value="CH3" className="bg-gray-800">Mixed (CH3)</option>
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => { setMachineReadings(new Map()); }}
-                    className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 transition-colors">
-                    <RefreshCw className="w-4 h-4" />Clear
-                  </button>
+                  <ActionButton icon={<Settings className="w-5 h-5" />} label="Settings" color="violet" onClick={() => setShowSettingsPanel(true)} />
                 </div>
               </div>
 
-              {/* Info Strip */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-                <InfoCard icon={<FileText className="w-5 h-5" />} label="Tests Today" value={todayStats.totalTests.toString()} color="blue" />
-                <InfoCard icon={<Settings className="w-5 h-5" />} label="Machine" value={selectedMachineId ? `M-${selectedMachineId}` : '--'} color="emerald" />
-                <InfoCard icon={<User className="w-5 h-5" />} label="Farmer ID" value={formatFarmerId(displayedReading.farmerId)} color="cyan" />
-                <InfoCard icon={<Award className="w-5 h-5" />} label="Bonus" value={`₹${displayedReading.incentive.toFixed(2)}`} color="purple" />
-              </div>
-
-              {/* Primary Readings Section */}
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-white/50 uppercase tracking-wider">Milk Quality</span>
-                  <span className={`text-xs font-medium ${isViewingHistory ? 'text-amber-400' : 'text-white/40'}`}>{formatTimestamp(displayedReading.timestamp)}</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <GlassReadingCard title="FAT" value={displayedReading.fat} unit="%" color="amber" maxValue={15} icon={<Droplet className="w-6 h-6" />} decimals={2} />
-                  <GlassReadingCard title="SNF" value={displayedReading.snf} unit="%" color="blue" maxValue={15} icon={<Gauge className="w-6 h-6" />} decimals={2} />
-                  <GlassReadingCard title="CLR" value={displayedReading.clr} unit="" color="purple" maxValue={100} icon={<Beaker className="w-6 h-6" />} decimals={1} />
-                </div>
-              </div>
-
-              {/* Transaction Section */}
-              <div className="mb-4">
-                <span className="block text-xs font-bold text-white/50 uppercase tracking-wider mb-3">Transaction</span>
-                <div className="grid grid-cols-3 gap-4 items-center">
-                  <TransactionItem label="Quantity" value={displayedReading.quantity.toFixed(2)} unit="L" color="cyan" />
-                  <TransactionItem label="Rate" value={`₹${displayedReading.rate.toFixed(2)}`} unit="/L" color="amber" />
-                  <div className="relative bg-gradient-to-br from-emerald-500/20 to-teal-500/20 backdrop-blur-xl rounded-2xl border border-emerald-500/30 p-4 text-center">
-                    <span className="text-xs text-emerald-400/80 uppercase tracking-wider block mb-1">Total</span>
-                    <span className="text-3xl font-black text-emerald-400">₹{displayedReading.totalAmount.toFixed(2)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Other Parameters Grid */}
-              <div className="mb-4">
-                <span className="block text-xs font-bold text-white/50 uppercase tracking-wider mb-3">Other Parameters</span>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                  <ParameterCard icon={<Droplet className="w-4 h-4" />} label="Milk Type" value={displayedReading.milkType === 'cow' ? 'Cow' : displayedReading.milkType === 'buffalo' ? 'Buffalo' : 'Mixed'} color="green" />
-                  <ParameterCard icon={<FlaskConical className="w-4 h-4" />} label="Protein" value={`${displayedReading.protein.toFixed(2)}%`} color="red" />
-                  <ParameterCard icon={<Beaker className="w-4 h-4" />} label="Lactose" value={`${displayedReading.lactose.toFixed(2)}%`} color="pink" />
-                  <ParameterCard icon={<Gauge className="w-4 h-4" />} label="Salt" value={`${displayedReading.salt.toFixed(2)}%`} color="slate" />
-                  <ParameterCard icon={<Droplets className="w-4 h-4" />} label="Water" value={`${displayedReading.water.toFixed(2)}%`} color="teal" />
-                  <ParameterCard icon={<Thermometer className="w-4 h-4" />} label="Temp" value={`${displayedReading.temperature.toFixed(1)}°C`} color="orange" />
-                </div>
-              </div>
-
-              {/* Live Trend Graph */}
-              <div className="mb-4">
-                <span className="block text-xs font-bold text-white/50 uppercase tracking-wider mb-3">Live Trend ({getTodayDateString()})</span>
-                <div className="bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10 p-4 h-48 flex items-center justify-center">
-                  {readingHistory.length > 0 ? (
-                    <div className="w-full h-full">
-                      <TrendChart readings={readingHistory} />
-                    </div>
-                  ) : (
-                    <div className="text-center text-white/40">
-                      <Waves className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No readings yet</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Today's Stats */}
-              {todayStats.totalTests > 0 && (
-                <div className="mb-4">
-                  <span className="block text-xs font-bold text-white/50 uppercase tracking-wider mb-3">Today's Stats</span>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <StatCard label="Total Qty" value={`${todayStats.totalQuantity.toFixed(1)} L`} icon={<Scale className="w-4 h-4" />} />
-                    <StatCard label="Revenue" value={`₹${todayStats.totalAmount.toFixed(0)}`} icon={<Award className="w-4 h-4" />} />
-                    <StatCard label="Avg FAT" value={`${todayStats.avgFat.toFixed(2)}%`} icon={<TrendingUp className="w-4 h-4" />} />
-                    <StatCard label="Avg SNF" value={`${todayStats.avgSnf.toFixed(2)}%`} icon={<TrendingDown className="w-4 h-4" />} />
-                  </div>
-                </div>
-              )}
-            </main>
-
-            {/* Bottom Command Bar */}
-            <div className="fixed bottom-0 left-0 right-0 z-50 backdrop-blur-xl bg-gray-900/90 border-t border-white/10 px-4 py-4 safe-area-pb">
-              <div className="max-w-2xl mx-auto grid grid-cols-4 gap-3">
-                <CommandButton icon={isTestRunning ? <Timer className="w-6 h-6" /> : <Play className="w-6 h-6" />}
-                  label={isTestRunning ? `${testElapsedSeconds}s` : 'Test'} color="emerald"
-                  onClick={isTestRunning ? undefined : handleTest} isActive={isTestRunning} />
-                <CommandButton icon={<Check className="w-6 h-6" />} label="OK" color="blue" onClick={handleOk} />
-                <CommandButton icon={<X className="w-6 h-6" />} label="Cancel" color="amber" onClick={handleCancel} />
-                <CommandButton icon={<Droplets className="w-6 h-6" />} label="Clean" color="purple" onClick={handleClean} />
-              </div>
-            </div>
-
-            {/* Farmer ID Dialog */}
-            <AnimatePresence>
-              {showFarmerIdDialog && <FarmerIdDialog />}
-            </AnimatePresence>
-
-            {/* Weight Dialog */}
-            <AnimatePresence>
-              {showWeightDialog && <WeightDialog />}
-            </AnimatePresence>
+            {/* ===== DIALOGS ===== */}
+            <AnimatePresence>{showFarmerIdDialog && <FarmerIdDialog />}</AnimatePresence>
+            <AnimatePresence>{showWeightDialog && <WeightDialog />}</AnimatePresence>
 
             {/* Settings Panel */}
             <AnimatePresence>
-              {settingsPanelContent}
+              {showSettingsPanel && (
+                <motion.div key="settings-panel" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setShowSettingsPanel(false)}>
+                  <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                    className={`rounded-2xl border shadow-2xl w-full max-w-lg mx-4 overflow-hidden ${
+                      isDark ? 'border-white/10 bg-gray-900' : 'border-gray-300 bg-white'
+                    }`}
+                    onClick={(e) => e.stopPropagation()}>
+                    {/* Settings Header */}
+                    <div className="flex items-center justify-between p-5 border-b border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-gray-800/50">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-100 dark:bg-violet-500/20"><Settings className="w-5 h-5 text-gray-700 dark:text-violet-400" /></div>
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Test Settings</h3>
+                      </div>
+                      <button onClick={() => setShowSettingsPanel(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-xl transition-colors"><X className="w-5 h-5 text-gray-700 dark:text-gray-400" /></button>
+                    </div>
+                    {/* Settings Content */}
+                    <div className="p-5 space-y-4 max-h-[60vh] overflow-auto">
+                      {Array.from(connectedBLEMachines.keys()).map((machineId) => (
+                        <div key={machineId} className="rounded-xl p-4 space-y-3 bg-gray-50 dark:bg-gray-800/50">
+                          <div className="flex items-center gap-2">
+                            <Bluetooth className="w-4 h-4 text-gray-700 dark:text-emerald-400" />
+                            <span className="font-semibold text-gray-900 dark:text-white text-sm">Machine M-{formatMachineId(machineId)}</span>
+                          </div>
+                          {/* Weighing Scale Mode */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-400"><Scale className="w-4 h-4" /><span>Weighing Scale:</span></div>
+                            <div className="flex gap-1">
+                              <button onClick={() => { const m = new Map(machineWeighingScaleMode); m.set(machineId, true); setMachineWeighingScaleMode(m); }}
+                                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${machineWeighingScaleMode.get(machineId) ?? false ? 'bg-gray-900 dark:bg-emerald-500/15 text-white dark:text-emerald-400 border border-gray-900 dark:border-emerald-500/30' : 'bg-gray-200 dark:bg-white/5 text-gray-700 dark:text-gray-500 hover:bg-gray-300 dark:hover:bg-white/10'}`}>Auto</button>
+                              <button onClick={() => { const m = new Map(machineWeighingScaleMode); m.set(machineId, false); setMachineWeighingScaleMode(m); }}
+                                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${!(machineWeighingScaleMode.get(machineId) ?? false) ? 'bg-gray-900 dark:bg-amber-500/15 text-white dark:text-amber-400 border border-gray-900 dark:border-amber-500/30' : 'bg-gray-200 dark:bg-white/5 text-gray-700 dark:text-gray-500 hover:bg-gray-300 dark:hover:bg-white/10'}`}>Manual</button>
+                            </div>
+                          </div>
+                          {/* Farmer ID Mode */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-400"><User className="w-4 h-4" /><span>Farmer ID:</span></div>
+                            <div className="flex gap-1">
+                              <button onClick={() => { const m = new Map(machineFarmerIdMode); m.set(machineId, true); setMachineFarmerIdMode(m); }}
+                                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${machineFarmerIdMode.get(machineId) ?? false ? 'bg-gray-900 dark:bg-emerald-500/15 text-white dark:text-emerald-400 border border-gray-900 dark:border-emerald-500/30' : 'bg-gray-200 dark:bg-white/5 text-gray-700 dark:text-gray-500 hover:bg-gray-300 dark:hover:bg-white/10'}`}>Auto</button>
+                              <button onClick={() => { const m = new Map(machineFarmerIdMode); m.set(machineId, false); setMachineFarmerIdMode(m); }}
+                                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${!(machineFarmerIdMode.get(machineId) ?? false) ? 'bg-gray-900 dark:bg-amber-500/15 text-white dark:text-amber-400 border border-gray-900 dark:border-amber-500/30' : 'bg-gray-200 dark:bg-white/5 text-gray-700 dark:text-gray-500 hover:bg-gray-300 dark:hover:bg-white/10'}`}>Manual</button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Settings Actions */}
+                    <div className="p-5 border-t border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-gray-800/50">
+                      <button onClick={() => setShowSettingsPanel(false)}
+                        className="w-full py-3 rounded-xl bg-gray-900 dark:bg-violet-500 text-white font-semibold hover:bg-gray-800 dark:hover:bg-violet-600 transition-all">Done</button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
             </AnimatePresence>
           </motion.div>
         </motion.div>
@@ -1642,149 +1704,684 @@ export default function ControlPanelDialog({ isOpen, onClose, machineDbId, initi
 }
 
 // ============================================
-// Sub-Components
+// Sub-Components - VertexGuard Inspired
 // ============================================
 
-function InfoCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color: string }) {
-  const colorMap: { [key: string]: string } = {
-    blue: 'from-blue-500/20 to-blue-600/10 border-blue-500/30 text-blue-400',
-    emerald: 'from-emerald-500/20 to-emerald-600/10 border-emerald-500/30 text-emerald-400',
-    cyan: 'from-cyan-500/20 to-cyan-600/10 border-cyan-500/30 text-cyan-400',
-    purple: 'from-purple-500/20 to-purple-600/10 border-purple-500/30 text-purple-400',
-  };
+/** Compact Reading Card - Maximized for available space */
+function CompactReadingCard({ icon, label, value, iconBg }: { icon: React.ReactNode; label: string; value: string; iconBg: string }) {
   return (
-    <div className={`bg-gradient-to-br ${colorMap[color]} backdrop-blur-xl rounded-xl border p-3 flex items-center gap-3`}>
-      <div className={`p-2 rounded-lg bg-${color}-500/20`}>{icon}</div>
-      <div>
-        <span className="block text-[10px] uppercase tracking-wider text-white/50">{label}</span>
-        <span className="text-base font-bold text-white">{value}</span>
+    <div className="flex flex-col items-center gap-3 p-5 rounded-2xl border border-gray-300 dark:border-white/10 hover:border-gray-400 dark:hover:border-white/20 transition-all hover:shadow-lg bg-white dark:bg-gray-900">
+      <div className={`w-14 h-14 rounded-2xl ${iconBg} text-white flex items-center justify-center shadow-lg`}
+        style={{ boxShadow: `0 8px 24px -4px ${iconBg.includes('pink') ? 'rgba(236,72,153,0.3)' : iconBg.includes('orange') ? 'rgba(249,115,22,0.3)' : iconBg.includes('violet') ? 'rgba(139,92,246,0.3)' : iconBg.includes('blue') ? 'rgba(59,130,246,0.3)' : iconBg.includes('cyan') ? 'rgba(6,182,212,0.3)' : 'rgba(20,184,166,0.3)'}` }}>
+        {icon}
+      </div>
+      <span className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">{value}</span>
+      <span className="text-[11px] text-gray-600 dark:text-gray-400 font-medium uppercase tracking-wide">{label}</span>
+    </div>
+  );
+}
+
+/** Compact Dashboard Card - Optimized padding */
+function CompactDashboardCard({ title, rightContent, children }: { title: string; rightContent?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-gray-300 dark:border-white/10 overflow-hidden h-full flex flex-col bg-white dark:bg-gray-900">
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 dark:border-white/10">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h3>
+        {rightContent}
+      </div>
+      <div className="p-5 flex-1">{children}</div>
+    </div>
+  );
+}
+
+/** Compact Quality Gauge - Maximized version */
+function CompactQualityGauge({ score, rating }: { score: number; rating: string }) {
+  const percentage = Math.min(score / 1000, 1);
+  const ratingColor = score >= 700 ? '#10b981' : score >= 500 ? '#f59e0b' : score >= 300 ? '#f97316' : score > 0 ? '#ef4444' : '#374151';
+  const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+  const bgStroke = isDark ? '#374151' : '#e5e7eb';
+
+  return (
+    <div className="flex flex-col items-center py-4">
+      {/* SVG Gauge */}
+      <div className="relative w-56 h-32">
+        <svg viewBox="0 0 200 110" className="w-full h-full">
+          {/* Background arc */}
+          <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke={bgStroke} strokeWidth="16" strokeLinecap="round" />
+          {/* Gradient definition */}
+          <defs>
+            <linearGradient id="compactGaugeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#06b6d4" />
+              <stop offset="50%" stopColor="#8b5cf6" />
+              <stop offset="100%" stopColor="#ec4899" />
+            </linearGradient>
+          </defs>
+          {/* Value arc */}
+          <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="url(#compactGaugeGradient)" strokeWidth="16" strokeLinecap="round"
+            strokeDasharray={`${percentage * 251.2} 251.2`} style={{ transition: 'stroke-dasharray 0.8s ease' }} />
+        </svg>
+        {/* Center text */}
+        <div className="absolute inset-0 flex flex-col items-center justify-end pb-0">
+          <span className="text-5xl font-black text-gray-900 dark:text-white leading-none">{score}</span>
+          <span className="text-xs font-semibold mt-2 px-3 py-1 rounded-full" style={{ color: ratingColor, background: `${ratingColor}15` }}>{rating}</span>
+        </div>
+      </div>
+      {/* Scale labels */}
+      <div className="w-full flex justify-between px-8 mt-2">
+        <span className="text-xs text-gray-600 dark:text-gray-400">0</span>
+        <span className="text-xs text-gray-600 dark:text-gray-400">1000</span>
       </div>
     </div>
   );
 }
 
-function GlassReadingCard({ title, value, unit, color, maxValue, icon, decimals = 2 }: { title: string; value: number; unit: string; color: string; maxValue: number; icon: React.ReactNode; decimals?: number }) {
-  const progress = Math.min(value / maxValue, 1);
-  const colorMap: { [key: string]: { bg: string; border: string; text: string; glow: string } } = {
-    amber: { bg: 'from-amber-500/20 to-amber-600/10', border: 'border-amber-500/40', text: 'text-amber-400', glow: 'bg-amber-500' },
-    blue: { bg: 'from-blue-500/20 to-blue-600/10', border: 'border-blue-500/40', text: 'text-blue-400', glow: 'bg-blue-500' },
-    purple: { bg: 'from-purple-500/20 to-purple-600/10', border: 'border-purple-500/40', text: 'text-purple-400', glow: 'bg-purple-500' },
-  };
-  const c = colorMap[color];
+/** Compact Composition Donut - Maximized version */
+function CompactCompositionDonut({ reading }: { reading: MilkReading }) {
+  const segments = [
+    { label: 'Fat', value: reading.fat, color: '#ec4899' },
+    { label: 'Protein', value: reading.protein, color: '#8b5cf6' },
+    { label: 'Lactose', value: reading.lactose, color: '#3b82f6' },
+    { label: 'Salt', value: reading.salt, color: '#06b6d4' },
+    { label: 'Water', value: reading.water, color: '#f97316' },
+  ];
+
+  const total = segments.reduce((sum, s) => sum + s.value, 0);
+  const hasData = total > 0;
+  const dominantPct = hasData ? Math.round((segments[0].value / Math.max(total, 0.01)) * 100) : 0;
+  const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+  const bgStroke = isDark ? '#374151' : '#e5e7eb';
+
+  // SVG donut parameters
+  const cx = 70, cy = 70, r = 50, strokeWidth = 18;
+  const circumference = 2 * Math.PI * r;
+  let accumulatedOffset = 0;
+
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-      className={`relative bg-gradient-to-br ${c.bg} backdrop-blur-xl rounded-2xl border ${c.border} p-5 overflow-hidden`}>
-      {/* Glow accent */}
-      <div className={`absolute top-0 left-0 right-0 h-1 ${c.glow} opacity-60`} style={{ width: `${progress * 100}%` }} />
-      
-      <div className="flex items-center justify-between mb-4">
-        <div className={`p-2 rounded-xl bg-white/10 ${c.text}`}>{icon}</div>
-        <span className={`text-xs font-bold uppercase tracking-wider ${c.text}`}>{title}</span>
-      </div>
-      
-      {/* Circular Progress */}
-      <div className="relative w-24 h-24 mx-auto mb-3">
-        <svg className="w-full h-full transform -rotate-90">
-          <circle cx="48" cy="48" r="42" fill="none" stroke="currentColor" strokeWidth="6" className="text-white/10" />
-          <circle cx="48" cy="48" r="42" fill="none" stroke="currentColor" strokeWidth="6"
-            className={c.text} strokeLinecap="round"
-            strokeDasharray={`${progress * 264} 264`} style={{ transition: 'stroke-dasharray 0.5s ease' }} />
+    <div className="flex items-center gap-6">
+      {/* Donut SVG */}
+      <div className="relative flex-shrink-0">
+        <svg width="140" height="140" viewBox="0 0 140 140">
+          {/* Background ring */}
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke={bgStroke} strokeWidth={strokeWidth} />
+          {/* Segments */}
+          {hasData && segments.map((seg, i) => {
+            const pct = seg.value / total;
+            const dashLen = pct * circumference;
+            const dashOffset = -accumulatedOffset;
+            accumulatedOffset += dashLen;
+            if (seg.value === 0) return null;
+            return (
+              <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={seg.color} strokeWidth={strokeWidth}
+                strokeDasharray={`${dashLen} ${circumference - dashLen}`}
+                strokeDashoffset={dashOffset}
+                strokeLinecap="round"
+                transform={`rotate(-90, ${cx}, ${cy})`}
+                style={{ transition: 'stroke-dasharray 0.5s ease, stroke-dashoffset 0.5s ease' }} />
+            );
+          })}
         </svg>
+        {/* Center percentage */}
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-3xl font-black text-white">{value.toFixed(decimals)}</span>
-          <span className="text-xs text-white/60">{unit}</span>
+          <span className="text-xl font-bold text-gray-900 dark:text-white">{hasData ? `${dominantPct}%` : '--'}</span>
         </div>
       </div>
-      
-      {/* Progress Bar */}
-      <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-        <motion.div initial={{ width: 0 }} animate={{ width: `${progress * 100}%` }}
-          className={`h-full ${c.glow} rounded-full`} transition={{ duration: 0.5 }} />
+
+      {/* Legend */}
+      <div className="flex flex-col gap-3 min-w-0 flex-1">
+        {segments.map((seg) => (
+          <div key={seg.label} className="flex items-center gap-2.5">
+            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: seg.color }} />
+            <span className="text-xs text-gray-700 dark:text-gray-300 truncate flex-1">{seg.label}</span>
+            <span className="text-xs font-semibold text-gray-900 dark:text-white">{seg.value.toFixed(2)}%</span>
+          </div>
+        ))}
       </div>
+    </div>
+  );
+}
+
+/** Connected Machines Report - Full table view like admin dashboard */
+function ConnectedMachinesReport({ 
+  connectedMachines, 
+  machineReadings,
+  machineReadingHistory,
+  formatTimestamp,
+  formatFarmerId,
+  selectedMachineId,
+  onSelectMachine
+}: { 
+  connectedMachines: Set<string>; 
+  machineReadings: Map<string, MilkReading>;
+  machineReadingHistory: Map<string, MilkReading[]>;
+  formatTimestamp: (d?: Date) => string;
+  formatFarmerId: (id: string) => string;
+  selectedMachineId: string | null;
+  onSelectMachine: (machineId: string) => void;
+}) {
+  const machines = Array.from(connectedMachines);
+
+  if (machines.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-10 text-gray-600 dark:text-gray-400">
+        <Monitor className="w-8 h-8 mb-2 opacity-40" />
+        <span className="text-sm">No machines connected</span>
+        <span className="text-xs mt-1">Connect via BLE dongle to see machines</span>
+      </div>
+    );
+  }
+
+  // Combine readings based on number of connected machines
+  const allReadings: Array<MilkReading & { machineId: string }> = [];
+  
+  // Strategy:
+  // - Single machine: Show all readings (live + historical)
+  // - Multiple machines: Show only LIVE data for all machines
+  const showOnlyLiveData = machines.length > 1;
+
+  // First, add current live readings
+  machines.forEach(machineId => {
+    const currentReading = machineReadings.get(machineId);
+    if (currentReading) {
+      allReadings.push({ 
+        ...currentReading, 
+        machineId,
+        timestamp: currentReading.timestamp instanceof Date ? currentReading.timestamp : new Date(currentReading.timestamp)
+      });
+    }
+  });
+
+  // Then, add historical readings ONLY if single machine
+  if (!showOnlyLiveData) {
+    machines.forEach(machineId => {
+      const history = machineReadingHistory.get(machineId);
+      if (history && history.length > 0) {
+        history.forEach(reading => {
+          // Ensure timestamp is a Date object
+          const readingTimestamp = reading.timestamp instanceof Date ? reading.timestamp : new Date(reading.timestamp);
+          
+          // Avoid duplicates - check if this reading already exists
+          const exists = allReadings.some(r => {
+            const rTimestamp = r.timestamp instanceof Date ? r.timestamp : new Date(r.timestamp);
+            return r.machineId === machineId && rTimestamp.getTime() === readingTimestamp.getTime();
+          });
+          
+          if (!exists) {
+            allReadings.push({ 
+              ...reading, 
+              machineId,
+              timestamp: readingTimestamp
+            });
+          }
+        });
+      }
+    });
+  }
+
+  // Sort by timestamp (newest first)
+  allReadings.sort((a, b) => {
+    const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime();
+    const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
+    return bTime - aTime;
+  });
+
+  if (allReadings.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-10 text-gray-600 dark:text-gray-400">
+        <Monitor className="w-8 h-8 mb-2 opacity-40" />
+        <span className="text-sm">No readings available yet</span>
+        <span className="text-xs mt-1">Waiting for data from machines...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+      <table className="w-full">
+        <thead className="sticky top-0 bg-white dark:bg-gray-900 z-10">
+          <tr className="border-b border-gray-200 dark:border-white/10">
+            <th className="text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Reading Time</th>
+            <th className="text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Machine ID</th>
+            <th className="text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Farmer ID</th>
+            <th className="text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">FAT %</th>
+            <th className="text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">SNF %</th>
+            <th className="text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">CLR</th>
+            <th className="text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Protein %</th>
+            <th className="text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Qty (L)</th>
+            <th className="text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Temp °C</th>
+            <th className="text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {allReadings.map((reading, index) => {
+            const isSelected = selectedMachineId === reading.machineId;
+            const currentMachineReading = machineReadings.get(reading.machineId);
+            const isLiveReading = currentMachineReading && (
+              (currentMachineReading.timestamp instanceof Date ? currentMachineReading.timestamp.getTime() : new Date(currentMachineReading.timestamp).getTime()) ===
+              (reading.timestamp instanceof Date ? reading.timestamp.getTime() : new Date(reading.timestamp).getTime())
+            );
+            
+            return (
+              <tr 
+                key={`${reading.machineId}-${reading.timestamp.getTime()}-${index}`}
+                className={`border-b border-gray-100 dark:border-white/5 transition-all cursor-pointer ${
+                  isSelected 
+                    ? 'bg-gray-100 dark:bg-gray-800/50 hover:bg-gray-200 dark:hover:bg-gray-800/70' 
+                    : 'hover:bg-gray-50 dark:hover:bg-gray-800/30'
+                }`}
+                onClick={() => onSelectMachine(reading.machineId)}
+              >
+                {/* Reading Time */}
+                <td className="py-3 px-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-700 dark:text-gray-300">{formatTimestamp(reading.timestamp)}</span>
+                    {isLiveReading && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
+                        LIVE
+                      </span>
+                    )}
+                  </div>
+                </td>
+
+                {/* Machine ID */}
+                <td className="py-3 px-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
+                      <Monitor className="w-3.5 h-3.5 text-white" />
+                    </div>
+                    <span className="text-xs font-semibold text-gray-900 dark:text-white">M-{reading.machineId}</span>
+                  </div>
+                </td>
+
+                {/* Farmer ID */}
+                <td className="py-3 px-3">
+                  <span className="text-xs text-gray-700 dark:text-gray-300">{formatFarmerId(reading.farmerId)}</span>
+                </td>
+
+                {/* FAT */}
+                <td className="py-3 px-3">
+                  <span className="text-xs font-semibold text-pink-600">{reading.fat.toFixed(2)}</span>
+                </td>
+
+                {/* SNF */}
+                <td className="py-3 px-3">
+                  <span className="text-xs font-semibold text-orange-600">{reading.snf.toFixed(2)}</span>
+                </td>
+
+                {/* CLR */}
+                <td className="py-3 px-3">
+                  <span className="text-xs font-semibold text-violet-600">{reading.clr.toFixed(1)}</span>
+                </td>
+
+                {/* Protein */}
+                <td className="py-3 px-3">
+                  <span className="text-xs font-semibold text-blue-600">{reading.protein.toFixed(2)}</span>
+                </td>
+
+                {/* Quantity */}
+                <td className="py-3 px-3">
+                  <span className="text-xs font-semibold text-cyan-600">{reading.quantity.toFixed(1)}</span>
+                </td>
+
+                {/* Temperature */}
+                <td className="py-3 px-3">
+                  <span className="text-xs font-semibold text-teal-600">{reading.temperature.toFixed(1)}</span>
+                </td>
+
+                {/* Amount */}
+                <td className="py-3 px-3">
+                  <span className="text-xs font-bold text-emerald-600">₹{reading.totalAmount.toFixed(2)}</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Individual reading stat card (like "Current Risk" cards in the image) */
+function ReadingStatCard({ icon, label, value, iconBg, iconColor }: { icon: React.ReactNode; label: string; value: string; iconBg: string; iconColor: string }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
+      className="flex flex-col items-center gap-3 p-4 rounded-2xl border border-gray-300 dark:border-white/10 transition-all hover:border-gray-400 dark:hover:border-white/20 hover:shadow-lg bg-white dark:bg-gray-900">
+      <div className={`w-12 h-12 rounded-2xl ${iconBg} ${iconColor} flex items-center justify-center shadow-lg`}
+        style={{ boxShadow: `0 8px 24px -4px ${iconBg.includes('pink') ? 'rgba(236,72,153,0.3)' : iconBg.includes('orange') ? 'rgba(249,115,22,0.3)' : iconBg.includes('violet') ? 'rgba(139,92,246,0.3)' : iconBg.includes('blue') ? 'rgba(59,130,246,0.3)' : iconBg.includes('cyan') ? 'rgba(6,182,212,0.3)' : 'rgba(20,184,166,0.3)'}` }}>
+        {icon}
+      </div>
+      <span className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">{value}</span>
+      <span className="text-[11px] text-gray-600 dark:text-gray-400 font-medium">{label}</span>
     </motion.div>
   );
 }
 
-function TransactionItem({ label, value, unit, color }: { label: string; value: string; unit: string; color: string }) {
-  const colorClasses: { [key: string]: string } = {
-    cyan: 'from-cyan-500/20 to-cyan-600/10 border-cyan-500/30 text-cyan-400',
-    amber: 'from-amber-500/20 to-amber-600/10 border-amber-500/30 text-amber-400',
-  };
-  return (
-    <div className={`bg-gradient-to-br ${colorClasses[color]} backdrop-blur-xl rounded-2xl border p-4 text-center`}>
-      <span className="text-xs text-white/50 uppercase tracking-wider block mb-1">{label}</span>
-      <span className="text-xl font-bold text-white">{value}</span>
-      <span className="text-xs text-white/40 ml-1">{unit}</span>
-    </div>
-  );
-}
+/** Quality Score Semi-circular Gauge (like "Risk Score" in the image) */
+function QualityScoreGauge({ score, rating }: { score: number; rating: string }) {
+  const percentage = Math.min(score / 1000, 1);
+  const ratingColor = score >= 700 ? '#10b981' : score >= 500 ? '#f59e0b' : score >= 300 ? '#f97316' : score > 0 ? '#ef4444' : '#374151';
 
-function ParameterCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color: string }) {
-  const colorMap: { [key: string]: string } = {
-    green: 'border-green-500/30 text-green-400',
-    red: 'border-red-500/30 text-red-400',
-    pink: 'border-pink-500/30 text-pink-400',
-    slate: 'border-slate-500/30 text-slate-400',
-    teal: 'border-teal-500/30 text-teal-400',
-    orange: 'border-orange-500/30 text-orange-400',
-  };
   return (
-    <div className={`bg-white/5 backdrop-blur-xl rounded-xl border ${colorMap[color]} p-3 flex items-center gap-2`}>
-      <div className={`p-1.5 rounded-lg bg-white/10 ${colorMap[color]}`}>{icon}</div>
-      <div>
-        <span className="block text-[9px] uppercase tracking-wider text-white/40">{label}</span>
-        <span className="text-sm font-bold text-white">{value}</span>
+    <div className="rounded-2xl border border-gray-300 dark:border-white/10 p-5 flex flex-col items-center bg-white dark:bg-gray-900">
+      {/* SVG Gauge */}
+      <div className="relative w-40 h-24 mb-2">
+        <svg viewBox="0 0 200 110" className="w-full h-full">
+          {/* Background arc */}
+          <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#e5e7eb" strokeWidth="14" strokeLinecap="round" />
+          {/* Gradient definition */}
+          <defs>
+            <linearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#06b6d4" />
+              <stop offset="50%" stopColor="#8b5cf6" />
+              <stop offset="100%" stopColor="#ec4899" />
+            </linearGradient>
+          </defs>
+          {/* Value arc */}
+          <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="url(#gaugeGradient)" strokeWidth="14" strokeLinecap="round"
+            strokeDasharray={`${percentage * 251.2} 251.2`} style={{ transition: 'stroke-dasharray 0.8s ease' }} />
+        </svg>
+        {/* Center text */}
+        <div className="absolute inset-0 flex flex-col items-center justify-end pb-0">
+          <span className="text-4xl font-black text-gray-900 leading-none">{score}</span>
+          <span className="text-xs font-semibold mt-1 px-2.5 py-0.5 rounded-full" style={{ color: ratingColor, background: `${ratingColor}15` }}>{rating}</span>
+        </div>
+      </div>
+      {/* Scale labels */}
+      <div className="w-full flex justify-between px-4 mt-1">
+        <span className="text-[10px] text-gray-600">0</span>
+        <span className="text-[10px] text-gray-600">1000</span>
       </div>
     </div>
   );
 }
 
-function StatCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+/** Dashboard Card container (dark card with title) */
+function DashboardCard({ title, rightContent, children }: { title: string; rightContent?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="bg-white/5 backdrop-blur-xl rounded-xl border border-white/10 p-3">
-      <div className="flex items-center gap-2 text-white/40 mb-1">{icon}<span className="text-[10px] uppercase">{label}</span></div>
-      <span className="text-lg font-bold text-white">{value}</span>
+    <div className="rounded-2xl border border-gray-300 dark:border-white/10 overflow-hidden bg-white dark:bg-gray-900">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-white/10">
+        <h3 className="text-[14px] font-semibold text-gray-900 dark:text-white">{title}</h3>
+        {rightContent}
+      </div>
+      <div className="p-5">{children}</div>
     </div>
   );
 }
 
-function CommandButton({ icon, label, color, onClick, isActive }: { icon: React.ReactNode; label: string; color: string; onClick?: () => void; isActive?: boolean }) {
-  const colorMap: { [key: string]: { bg: string; hover: string; text: string; activeBg: string } } = {
-    emerald: { bg: 'bg-emerald-500/20', hover: 'hover:bg-emerald-500/30', text: 'text-emerald-400', activeBg: 'bg-emerald-500/40' },
-    blue: { bg: 'bg-blue-500/20', hover: 'hover:bg-blue-500/30', text: 'text-blue-400', activeBg: 'bg-blue-500/40' },
-    amber: { bg: 'bg-amber-500/20', hover: 'hover:bg-amber-500/30', text: 'text-amber-400', activeBg: 'bg-amber-500/40' },
-    purple: { bg: 'bg-purple-500/20', hover: 'hover:bg-purple-500/30', text: 'text-purple-400', activeBg: 'bg-purple-500/40' },
+/** SVG Trend Line Chart */
+function TrendChartSVG({ readings }: { readings: MilkReading[] }) {
+  const points = readings.slice(-20);
+  console.log('TrendChartSVG Debug - Received readings:', readings.length, 'Using points:', points.length);
+  
+  if (points.length < 2) {
+    console.log('TrendChartSVG Debug - Not enough points for trend chart:', points.length);
+    return null;
+  }
+
+  const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+  const gridColor = isDark ? '#374151' : '#e5e7eb';
+  const textColor = isDark ? '#9ca3af' : '#6b7280';
+  const tooltipBg = isDark ? '#1f2937' : '#f9fafb';
+  const tooltipBorder = isDark ? '#374151' : '#e5e7eb';
+  const pointStroke = isDark ? '#111827' : '#ffffff';
+
+  const W = 640, H = 200, PX = 40, PY = 20;
+  const chartW = W - PX * 2, chartH = H - PY * 2;
+
+  const maxFat = Math.max(...points.map(r => r.fat), 8);
+  const maxSnf = Math.max(...points.map(r => r.snf), 12);
+  const maxQuantity = Math.max(...points.map(r => r.quantity), 1000);
+  
+  // Scale quantity to be comparable with FAT/SNF for display (quantity is in liters, FAT/SNF are percentages)
+  const quantityScaleFactor = Math.max(maxFat, maxSnf) / maxQuantity;
+  const scaledQuantities = points.map(p => p.quantity * quantityScaleFactor);
+  const maxScaledQuantity = Math.max(...scaledQuantities);
+  
+  console.log('TrendChartSVG Debug - Quantity scaling:', { maxQuantity, quantityScaleFactor: quantityScaleFactor.toFixed(4), maxScaledQuantity: maxScaledQuantity.toFixed(2) });
+  
+  const maxVal = Math.max(maxFat, maxSnf, maxScaledQuantity) * 1.15;
+
+  const xScale = (i: number) => PX + (i / (points.length - 1)) * chartW;
+  const yScale = (val: number) => PY + chartH - (val / maxVal) * chartH;
+
+  // Build smooth line paths
+  const buildPath = (values: number[]) => {
+    return values.map((v, i) => `${i === 0 ? 'M' : 'L'}${xScale(i).toFixed(1)},${yScale(v).toFixed(1)}`).join(' ');
   };
-  const c = colorMap[color];
+
+  const buildAreaPath = (values: number[]) => {
+    const linePath = buildPath(values);
+    return `${linePath} L${xScale(values.length - 1).toFixed(1)},${(PY + chartH).toFixed(1)} L${PX.toFixed(1)},${(PY + chartH).toFixed(1)} Z`;
+  };
+
+  const fatValues = points.map(p => p.fat);
+  const snfValues = points.map(p => p.snf);
+  const quantityValues = points.map(p => p.quantity * quantityScaleFactor);
+
+  // Grid lines
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(pct => ({
+    y: PY + chartH - pct * chartH,
+    label: (pct * maxVal).toFixed(1),
+  }));
+
+  // Find last point for tooltip-like indicator
+  const lastFat = fatValues[fatValues.length - 1];
+  const lastSnf = snfValues[snfValues.length - 1];
+  const lastQuantity = points[points.length - 1].quantity;
+  const lastScaledQuantity = quantityValues[quantityValues.length - 1];
+  const lastX = xScale(points.length - 1);
+
   return (
-    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={onClick} disabled={isActive}
-      className={`flex flex-col items-center justify-center gap-1.5 py-3 px-2 rounded-2xl border border-white/10 transition-colors ${isActive ? c.activeBg : c.bg} ${!isActive && c.hover} ${c.text} ${isActive ? 'animate-pulse' : ''}`}>
-      {icon}
-      <span className="text-xs font-semibold uppercase tracking-wider">{label}</span>
-    </motion.button>
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="fatAreaGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.3" />
+          <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id="snfAreaGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.15" />
+          <stop offset="100%" stopColor="#06b6d4" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id="quantityAreaGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#10b981" stopOpacity="0.2" />
+          <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
+      {/* Grid */}
+      {gridLines.map((g, i) => (
+        <g key={i}>
+          <line x1={PX} y1={g.y} x2={W - PX} y2={g.y} stroke={gridColor} strokeWidth="1" strokeDasharray="4 4" />
+          <text x={PX - 6} y={g.y + 4} textAnchor="end" fill={textColor} fontSize="9" fontFamily="system-ui">{g.label}</text>
+        </g>
+      ))}
+
+      {/* Area fills */}
+      <path d={buildAreaPath(fatValues)} fill="url(#fatAreaGrad)" />
+      <path d={buildAreaPath(quantityValues)} fill="url(#quantityAreaGrad)" />
+
+      {/* Lines */}
+      <path d={buildPath(snfValues)} fill="none" stroke="#06b6d4" strokeWidth="2" opacity="0.6" strokeLinejoin="round" />
+      <path d={buildPath(quantityValues)} fill="none" stroke="#10b981" strokeWidth="2" opacity="0.7" strokeLinejoin="round" />
+      <path d={buildPath(fatValues)} fill="none" stroke="#8b5cf6" strokeWidth="2.5" strokeLinejoin="round" />
+
+      {/* Data points (last few) */}
+      {points.slice(-5).map((_, i) => {
+        const idx = points.length - 5 + i;
+        if (idx < 0) return null;
+        return (
+          <g key={idx}>
+            <circle cx={xScale(idx)} cy={yScale(fatValues[idx])} r="3" fill="#8b5cf6" />
+            <circle cx={xScale(idx)} cy={yScale(quantityValues[idx])} r="2.5" fill="#10b981" />
+          </g>
+        );
+      })}
+
+      {/* Last point indicators */}
+      <circle cx={lastX} cy={yScale(lastFat)} r="5" fill="#8b5cf6" stroke={pointStroke} strokeWidth="2" />
+      <circle cx={lastX} cy={yScale(lastScaledQuantity)} r="4" fill="#10b981" stroke={pointStroke} strokeWidth="2" />
+
+      {/* Tooltip box at last point */}
+      <g>
+        <rect x={lastX - 70} y={yScale(lastFat) - 44} width="140" height="36" rx="6" fill={tooltipBg} stroke={tooltipBorder} strokeWidth="1" />
+        <text x={lastX} y={yScale(lastFat) - 25} textAnchor="middle" fill="#8b5cf6" fontSize="9" fontWeight="600" fontFamily="system-ui">
+          FAT {lastFat.toFixed(2)} | SNF {lastSnf.toFixed(2)}
+        </text>
+        <text x={lastX} y={yScale(lastFat) - 13} textAnchor="middle" fill="#10b981" fontSize="9" fontWeight="600" fontFamily="system-ui">
+          QTY {lastQuantity.toFixed(0)}L
+        </text>
+      </g>
+
+      {/* X-axis labels */}
+      {points.filter((_, i) => i % Math.max(1, Math.floor(points.length / 6)) === 0 || i === points.length - 1).map((p, i) => {
+        const origIdx = points.indexOf(p);
+        const label = p.timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        return <text key={i} x={xScale(origIdx)} y={H - 4} textAnchor="middle" fill={textColor} fontSize="9" fontFamily="system-ui">{label}</text>;
+      })}
+
+      {/* Legend */}
+      <circle cx={PX + 10} cy={8} r="4" fill="#8b5cf6" />
+      <text x={PX + 18} y={12} fill="#8b5cf6" fontSize="10" fontFamily="system-ui">FAT</text>
+      <circle cx={PX + 56} cy={8} r="4" fill="#06b6d4" />
+      <text x={PX + 64} y={12} fill="#06b6d4" fontSize="10" fontFamily="system-ui">SNF</text>
+      <circle cx={PX + 102} cy={8} r="4" fill="#10b981" />
+      <text x={PX + 110} y={12} fill="#10b981" fontSize="10" fontFamily="system-ui">QTY</text>
+    </svg>
   );
 }
 
-function TrendChart({ readings }: { readings: MilkReading[] }) {
-  const last20 = readings.slice(-20);
-  if (last20.length < 2) return <div className="flex items-center justify-center h-full text-white/40 text-sm">Need at least 2 readings</div>;
+/** Composition Donut Chart (like "Threats By Virus") */
+function CompositionDonut({ reading }: { reading: MilkReading }) {
+  const segments = [
+    { label: 'Fat', value: reading.fat, color: '#ec4899' },
+    { label: 'Protein', value: reading.protein, color: '#8b5cf6' },
+    { label: 'Lactose', value: reading.lactose, color: '#3b82f6' },
+    { label: 'Salt', value: reading.salt, color: '#06b6d4' },
+    { label: 'Water', value: reading.water, color: '#f97316' },
+  ];
 
-  const maxFat = Math.max(...last20.map(r => r.fat), 10);
-  const maxSnf = Math.max(...last20.map(r => r.snf), 15);
-  const maxVal = Math.max(maxFat, maxSnf);
+  const total = segments.reduce((sum, s) => sum + s.value, 0);
+  const hasData = total > 0;
+  const dominantPct = hasData ? Math.round((segments[0].value / Math.max(total, 0.01)) * 100) : 0;
+
+  // SVG donut parameters
+  const cx = 70, cy = 70, r = 50, strokeWidth = 18;
+  const circumference = 2 * Math.PI * r;
+  let accumulatedOffset = 0;
 
   return (
-    <div className="w-full h-full flex items-end gap-1">
-      {last20.map((r, i) => (
-        <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
-          <div className="w-full flex flex-col gap-0.5 items-center" style={{ height: '100%' }}>
-            <div className="flex-1 w-full flex items-end justify-center gap-0.5">
-              <div className="w-1/3 bg-amber-500/80 rounded-t-sm transition-all" style={{ height: `${(r.fat / maxVal) * 100}%`, minHeight: 4 }} title={`FAT: ${r.fat.toFixed(2)}%`} />
-              <div className="w-1/3 bg-blue-500/80 rounded-t-sm transition-all" style={{ height: `${(r.snf / maxVal) * 100}%`, minHeight: 4 }} title={`SNF: ${r.snf.toFixed(2)}%`} />
-            </div>
-          </div>
+    <div className="flex items-center gap-4">
+      {/* Donut SVG */}
+      <div className="relative flex-shrink-0">
+        <svg width="140" height="140" viewBox="0 0 140 140">
+          {/* Background ring */}
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke="#e5e7eb" strokeWidth={strokeWidth} />
+          {/* Segments */}
+          {hasData && segments.map((seg, i) => {
+            const pct = seg.value / total;
+            const dashLen = pct * circumference;
+            const dashOffset = -accumulatedOffset;
+            accumulatedOffset += dashLen;
+            if (seg.value === 0) return null;
+            return (
+              <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={seg.color} strokeWidth={strokeWidth}
+                strokeDasharray={`${dashLen} ${circumference - dashLen}`}
+                strokeDashoffset={dashOffset}
+                strokeLinecap="round"
+                transform={`rotate(-90, ${cx}, ${cy})`}
+                style={{ transition: 'stroke-dasharray 0.5s ease, stroke-dashoffset 0.5s ease' }} />
+            );
+          })}
+        </svg>
+        {/* Center percentage */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-xl font-bold text-gray-900">{hasData ? `${dominantPct}%` : '--'}</span>
         </div>
-      ))}
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-col gap-2 min-w-0 flex-1">
+        {segments.map((seg) => (
+          <div key={seg.label} className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: seg.color }} />
+            <span className="text-xs text-gray-700 truncate flex-1">{seg.label}</span>
+            <span className="text-xs font-semibold text-gray-900">{seg.value.toFixed(2)}%</span>
+          </div>
+        ))}
+      </div>
     </div>
+  );
+}
+
+/** Reading Details Table (like "Threat Details") */
+function ReadingDetailsTable({ readings, formatTimestamp, formatFarmerId }: { readings: MilkReading[]; formatTimestamp: (d?: Date) => string; formatFarmerId: (id: string) => string }) {
+  const recentReadings = [...readings].reverse().slice(0, 10);
+
+  if (recentReadings.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-10 text-gray-600">
+        <FileText className="w-8 h-8 mb-2 opacity-40" />
+        <span className="text-sm">No readings recorded yet</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full">
+        <thead>
+          <tr className="border-b border-gray-200">
+            {['Time', 'Machine', 'Farmer', 'FAT%', 'SNF%', 'CLR', 'Qty(L)'].map(h => (
+              <th key={h} className="text-left py-3 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-600">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {recentReadings.map((r, i) => (
+            <tr key={i} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+              <td className="py-2.5 px-3 text-xs text-gray-700">{formatTimestamp(r.timestamp)}</td>
+              <td className="py-2.5 px-3 text-xs font-medium text-gray-900">M-{r.machineId}</td>
+              <td className="py-2.5 px-3 text-xs text-gray-700">{formatFarmerId(r.farmerId)}</td>
+              <td className="py-2.5 px-3 text-xs font-semibold text-pink-600">{r.fat.toFixed(2)}</td>
+              <td className="py-2.5 px-3 text-xs font-semibold text-orange-600">{r.snf.toFixed(2)}</td>
+              <td className="py-2.5 px-3 text-xs text-violet-600">{r.clr.toFixed(1)}</td>
+              <td className="py-2.5 px-3 text-xs text-cyan-400">{r.quantity.toFixed(1)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Mini stat block */
+function MiniStat({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+  return (
+    <div className="rounded-xl p-4 border border-gray-300 dark:border-white/10 bg-gray-50 dark:bg-gray-800/50">
+      <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 mb-2">{icon}<span className="text-xs uppercase tracking-wider">{label}</span></div>
+      <span className="text-lg font-bold text-gray-900 dark:text-white">{value}</span>
+    </div>
+  );
+}
+
+/** Bottom Action Button */
+function ActionButton({ icon, label, color, onClick, isActive, isPrimary }: {
+  icon: React.ReactNode; label: string; color: string; onClick?: () => void; isActive?: boolean; isPrimary?: boolean;
+}) {
+  const colorMap: Record<string, { bg: string; hover: string; text: string; activePulse: string; shadow: string }> = {
+    violet: { bg: 'bg-gray-100 dark:bg-gray-800', hover: 'hover:bg-gray-200 dark:hover:bg-gray-700', text: 'text-gray-900 dark:text-white', activePulse: 'bg-gray-200 dark:bg-gray-700', shadow: 'shadow-gray-300 dark:shadow-gray-900' },
+    emerald: { bg: 'bg-gray-100 dark:bg-gray-800', hover: 'hover:bg-gray-200 dark:hover:bg-gray-700', text: 'text-gray-900 dark:text-white', activePulse: 'bg-gray-200 dark:bg-gray-700', shadow: 'shadow-gray-300 dark:shadow-gray-900' },
+    amber: { bg: 'bg-gray-100 dark:bg-gray-800', hover: 'hover:bg-gray-200 dark:hover:bg-gray-700', text: 'text-gray-900 dark:text-white', activePulse: 'bg-gray-200 dark:bg-gray-700', shadow: 'shadow-gray-300 dark:shadow-gray-900' },
+    blue: { bg: 'bg-gray-100 dark:bg-gray-800', hover: 'hover:bg-gray-200 dark:hover:bg-gray-700', text: 'text-gray-900 dark:text-white', activePulse: 'bg-gray-200 dark:bg-gray-700', shadow: 'shadow-gray-300 dark:shadow-gray-900' },
+  };
+  const c = colorMap[color] || colorMap.violet;
+
+  return (
+    <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={onClick} disabled={isActive}
+      className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-white/10 transition-all font-medium text-sm ${
+        isActive ? `${c.activePulse} ${c.text} animate-pulse` : `${c.bg} ${c.hover} ${c.text}`
+      } ${isPrimary ? `shadow-lg ${c.shadow}` : ''}`}>
+      {icon}
+      <span className="hidden sm:inline">{label}</span>
+    </motion.button>
   );
 }

@@ -1685,30 +1685,32 @@ function MachineManagement() {
           // Use safeLog to prevent buffer overruns with large data packets
           safeLog(`📥 [BLE Data] Device ${dongleDeviceId} (${data.length} bytes):`, data.substring(0, 100));
           
-          // Extract machine ID from data and store
-          const machineIdMatch = data.match(/MM(\d+)/);
-          if (machineIdMatch) {
-            const machineId = machineIdMatch[1];
+          // Resolve machine ID: prefer dongle mapping (matches connectedBLEMachines keys)
+          // over raw MM extraction (which is the firmware internal ID and may differ)
+          let resolvedMachineId: string | null = null;
+          
+          // 1. Try dongle device mapping first (most reliable - same keys as connectedBLEMachines)
+          machineIdToDongleId.forEach((dId, mId) => {
+            if (dId === dongleDeviceId) {
+              resolvedMachineId = mId;
+            }
+          });
+          
+          // 2. Fallback: extract from MM field in data
+          if (!resolvedMachineId) {
+            const machineIdMatch = data.match(/MM(\d+)/);
+            if (machineIdMatch) {
+              resolvedMachineId = machineIdMatch[1];
+            }
+          }
+          
+          if (resolvedMachineId) {
+            const machineId = resolvedMachineId;
             setBleDataReceived(prev => new Map(prev).set(machineId, data));
             forwardBleData(machineId, data); // Forward to Control Panel via context
             console.log(`📊 [BLE Data] Machine ${machineId} → Dongle ID ${dongleDeviceId}`);
           } else {
-            // Try to find machine ID from dongleDeviceId mapping
-            let foundMachineId: string | null = null;
-            machineIdToDongleId.forEach((dId, mId) => {
-              if (dId === dongleDeviceId) {
-                foundMachineId = mId;
-              }
-            });
-            
-            if (foundMachineId) {
-              const machineId = foundMachineId; // Capture for closures
-              setBleDataReceived(prev => new Map(prev).set(machineId, data));
-              forwardBleData(machineId, data); // Forward to Control Panel via context
-              console.log(`📊 [BLE Data] Machine ${machineId} (via mapping) → Dongle ID ${dongleDeviceId}`);
-            } else {
-              console.warn(`⚠️ [BLE Data] Could not identify machine for dongle ID ${dongleDeviceId}`);
-            }
+            console.warn(`⚠️ [BLE Data] Could not identify machine for dongle ID ${dongleDeviceId}`);
           }
         }
       }
@@ -1722,12 +1724,19 @@ function MachineManagement() {
         // Use safeLog to prevent buffer overruns with large data packets
         safeLog(`📥 [BLE Data] Received (${data.length} bytes):`, data.substring(0, 100));
         
-        // Extract machine ID from data and store
-        const machineIdMatch = data.match(/MM(\d+)/);
-        if (machineIdMatch) {
-          const machineId = machineIdMatch[1];
-          setBleDataReceived(prev => new Map(prev).set(machineId, data));
-          forwardBleData(machineId, data); // Forward to Control Panel via context
+        // Resolve machine ID: prefer dongle mapping over raw MM extraction
+        let resolvedId: string | null = null;
+        machineIdToDongleId.forEach((dId, mId) => {
+          // Legacy handler doesn't have dongleDeviceId, try matching any connected machine
+          if (!resolvedId) resolvedId = mId;
+        });
+        if (!resolvedId) {
+          const machineIdMatch = data.match(/MM(\d+)/);
+          if (machineIdMatch) resolvedId = machineIdMatch[1];
+        }
+        if (resolvedId) {
+          setBleDataReceived(prev => new Map(prev).set(resolvedId!, data));
+          forwardBleData(resolvedId!, data);
         }
       }
     }

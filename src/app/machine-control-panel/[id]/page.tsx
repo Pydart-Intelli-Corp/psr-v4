@@ -236,18 +236,15 @@ function parseLactosureData(rawData: string): MilkReading | null {
 // Glassmorphism Loader
 function FullScreenLoader() {
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center z-50">
-      <div className="flex flex-col items-center gap-6">
-        <div className="relative">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-emerald-500 to-cyan-500 opacity-20 animate-pulse" />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-16 h-16 border-4 border-emerald-500/30 rounded-full" />
-            <div className="absolute w-16 h-16 border-4 border-emerald-400 border-t-transparent rounded-full animate-spin" />
-          </div>
+    <div className="fixed inset-0 bg-[#060a13] flex items-center justify-center z-50">
+      <div className="flex flex-col items-center gap-5">
+        <div className="relative w-14 h-14">
+          <div className="absolute inset-0 rounded-full border-2 border-white/[0.06]" />
+          <div className="absolute inset-0 rounded-full border-2 border-emerald-400/70 border-t-transparent animate-spin" />
         </div>
         <div className="text-center">
-          <h2 className="text-xl font-bold text-white mb-1">Control Panel</h2>
-          <p className="text-gray-400 text-sm">Initializing dashboard...</p>
+          <h2 className="text-sm font-semibold text-white/80 tracking-wide">Control Panel</h2>
+          <p className="text-white/30 text-xs mt-1">Initializing...</p>
         </div>
       </div>
     </div>
@@ -263,19 +260,19 @@ function Toast({ type, message, onClose }: { type: 'success' | 'error'; message:
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: -30, scale: 0.9 }}
+      initial={{ opacity: 0, y: -20, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -30, scale: 0.9 }}
-      className={`flex items-center gap-3 px-5 py-3.5 rounded-2xl backdrop-blur-xl shadow-2xl ${
-        type === 'success' 
-          ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300' 
-          : 'bg-red-500/20 border border-red-500/40 text-red-300'
+      exit={{ opacity: 0, y: -20, scale: 0.95 }}
+      className={`flex items-center gap-2.5 px-4 py-3 rounded-xl backdrop-blur-2xl shadow-2xl ring-1 ${
+        type === 'success'
+          ? 'bg-emerald-500/10 ring-emerald-500/20 text-emerald-400'
+          : 'bg-red-500/10 ring-red-500/20 text-red-400'
       }`}
     >
-      {type === 'success' ? <Check className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
-      <span className="text-sm font-medium">{message}</span>
-      <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-full transition-colors ml-2">
-        <X className="w-4 h-4" />
+      {type === 'success' ? <Check className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+      <span className="text-xs font-medium max-w-xs truncate">{message}</span>
+      <button onClick={onClose} className="p-1 hover:bg-white/[0.06] rounded-md transition-colors ml-1">
+        <X className="w-3.5 h-3.5" />
       </button>
     </motion.div>
   );
@@ -796,16 +793,20 @@ export default function MachineControlPanelDashboard() {
 
   // Computed reading history for current machine (matching Flutter's _currentReadingHistory getter)
   const readingHistory = useMemo((): MilkReading[] => {
-    // First try to get history for selected machine
-    if (selectedMachineId && machineReadingHistory.has(selectedMachineId)) {
-      return machineReadingHistory.get(selectedMachineId)!;
+    if (selectedMachineId) {
+      if (machineReadingHistory.has(selectedMachineId)) {
+        return machineReadingHistory.get(selectedMachineId)!;
+      }
+      const normalized = normalizeId(selectedMachineId);
+      if (machineReadingHistory.has(normalized)) {
+        return machineReadingHistory.get(normalized)!;
+      }
     }
-    // If selected machine doesn't have history, try to find any machine with history
     for (const [, readings] of machineReadingHistory) {
       if (readings.length > 0) return readings;
     }
     return [];
-  }, [selectedMachineId, machineReadingHistory]);
+  }, [selectedMachineId, machineReadingHistory, normalizeId]);
 
   // History navigation
   const goToPreviousReading = () => {
@@ -833,11 +834,20 @@ export default function MachineControlPanelDashboard() {
       const idx = readingHistory.length - 1 - historyIndex;
       return readingHistory[Math.max(0, Math.min(idx, readingHistory.length - 1))] || emptyReading;
     }
-    if (selectedMachineId && machineReadings.has(selectedMachineId)) {
-      return machineReadings.get(selectedMachineId)!;
+    if (selectedMachineId) {
+      if (machineReadings.has(selectedMachineId)) {
+        return machineReadings.get(selectedMachineId)!;
+      }
+      const normalized = normalizeId(selectedMachineId);
+      if (machineReadings.has(normalized)) {
+        return machineReadings.get(normalized)!;
+      }
+    }
+    if (machineReadings.size === 1) {
+      return Array.from(machineReadings.values())[0];
     }
     return emptyReading;
-  }, [isViewingHistory, readingHistory, historyIndex, selectedMachineId, machineReadings]);
+  }, [isViewingHistory, readingHistory, historyIndex, selectedMachineId, machineReadings, normalizeId]);
 
   // Format functions
   const formatFarmerId = (id: string) => id.replace(/^0+/, '') || '0';
@@ -871,12 +881,12 @@ export default function MachineControlPanelDashboard() {
 
   if (!machine) {
     return (
-      <div className="fixed inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
+      <div className="fixed inset-0 bg-[#060a13] flex items-center justify-center">
         <div className="text-center">
-          <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-white">Machine Not Found</h2>
-          <p className="text-gray-400 mt-2 mb-6">The machine could not be loaded</p>
-          <button onClick={() => router.back()} className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold transition-colors">
+          <AlertTriangle className="w-12 h-12 text-red-400/70 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-white/80">Machine Not Found</h2>
+          <p className="text-white/30 text-sm mt-2 mb-6">The machine could not be loaded</p>
+          <button onClick={() => router.back()} className="px-5 py-2.5 bg-white/[0.06] hover:bg-white/[0.1] text-white/70 rounded-xl text-sm font-medium transition-colors ring-1 ring-white/[0.08]">
             Go Back
           </button>
         </div>
@@ -885,231 +895,151 @@ export default function MachineControlPanelDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900">
-      {/* Ambient Background Effects */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 left-20 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-20 right-20 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-purple-500/5 rounded-full blur-3xl" />
+    <div className="h-screen flex flex-col bg-[#060a13] text-white overflow-hidden">
+      {/* Subtle ambient glow */}
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute -top-40 left-1/4 w-[600px] h-[600px] bg-emerald-500/[0.02] rounded-full blur-[160px]" />
+        <div className="absolute -bottom-40 right-1/3 w-[500px] h-[500px] bg-sky-500/[0.02] rounded-full blur-[160px]" />
       </div>
 
-      {/* Header */}
-      <header className="sticky top-0 z-40 backdrop-blur-xl bg-gray-900/80 border-b border-white/10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            {/* Left */}
-            <div className="flex items-center gap-4">
-              <button onClick={() => router.back()} className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 transition-colors">
-                <ArrowLeft className="w-5 h-5 text-white" />
-              </button>
-              <div>
-                <h1 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-emerald-400" />
-                  Control Panel
-                </h1>
-                <p className="text-xs text-gray-400">{machine.machineName} • {getTodayDateString()}</p>
-              </div>
-              {/* Settings Button */}
-              <button 
-                onClick={() => setShowSettingsPanel(true)}
-                className="p-2.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 transition-colors"
-                title="Test Settings"
-              >
-                <Settings className="w-5 h-5 text-purple-400" />
-              </button>
-              
-              {/* Channel Dropdown - matching Flutter's ChannelDropdownButton */}
-              <div className="relative group">
-                <button
-                  className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
-                    selectedChannel === 'CH1'
-                      ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-400'
-                      : selectedChannel === 'CH2'
-                      ? 'bg-blue-500/15 border-blue-500/50 text-blue-400'
-                      : 'bg-amber-500/15 border-amber-500/50 text-amber-400'
-                  }`}
-                >
-                  <span className={`p-1 rounded-lg ${
-                    selectedChannel === 'CH1' ? 'bg-emerald-500/20' : selectedChannel === 'CH2' ? 'bg-blue-500/20' : 'bg-amber-500/20'
+      {/* ===== TOP BAR ===== */}
+      <header className="relative z-40 flex-shrink-0 h-14 flex items-center justify-between px-3 lg:px-5 bg-white/[0.02] backdrop-blur-2xl border-b border-white/[0.06]">
+        {/* Left cluster */}
+        <div className="flex items-center gap-2.5">
+          <button onClick={() => router.back()} className="w-9 h-9 flex items-center justify-center rounded-lg bg-white/[0.05] hover:bg-white/[0.1] transition-colors">
+            <ArrowLeft className="w-4 h-4 text-white/70" />
+          </button>
+          <div className="hidden sm:block h-5 w-px bg-white/[0.08]" />
+          <div className="hidden sm:flex flex-col">
+            <span className="text-[13px] font-semibold text-white/90 leading-none tracking-tight">Control Panel</span>
+            <span className="text-[10px] text-white/35 leading-tight mt-0.5">{machine.machineName} &middot; {getTodayDateString()}</span>
+          </div>
+          <button onClick={() => setShowSettingsPanel(true)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/[0.04] hover:bg-white/[0.08] transition-colors" title="Settings">
+            <Settings className="w-3.5 h-3.5 text-white/40" />
+          </button>
+          {/* Channel Selector */}
+          <div className="relative group">
+            <button className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all text-xs font-medium ${
+              selectedChannel === 'CH1' ? 'bg-emerald-500/[0.08] border-emerald-500/20 text-emerald-400'
+              : selectedChannel === 'CH2' ? 'bg-sky-500/[0.08] border-sky-500/20 text-sky-400'
+              : 'bg-amber-500/[0.08] border-amber-500/20 text-amber-400'
+            }`}>
+              <span>{selectedChannel === 'CH1' ? '🐄' : selectedChannel === 'CH2' ? '🐃' : '🔀'}</span>
+              <span>{selectedChannel === 'CH1' ? 'Cow' : selectedChannel === 'CH2' ? 'Buffalo' : 'Mixed'}</span>
+              <ChevronRight className="w-3 h-3 opacity-50 rotate-90" />
+            </button>
+            <div className="absolute left-0 top-full mt-1 min-w-[140px] py-1 bg-[#111827] rounded-xl border border-white/[0.1] shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
+              {(['CH1', 'CH2', 'CH3'] as const).map((ch) => (
+                <button key={ch} onClick={() => setSelectedChannel(ch)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors ${
+                    selectedChannel === ch ? 'bg-white/[0.06] text-white' : 'text-white/50 hover:bg-white/[0.04]'
                   }`}>
-                    {selectedChannel === 'CH1' ? '🐄' : selectedChannel === 'CH2' ? '🐃' : '🔀'}
-                  </span>
-                  <span className="text-sm font-medium">
-                    {selectedChannel === 'CH1' ? 'Cow' : selectedChannel === 'CH2' ? 'Buffalo' : 'Mixed'}
-                  </span>
-                  <ChevronRight className="w-4 h-4 rotate-90" />
+                  <span>{ch === 'CH1' ? '🐄' : ch === 'CH2' ? '🐃' : '🔀'}</span>
+                  <span className="font-medium">{ch === 'CH1' ? 'Cow' : ch === 'CH2' ? 'Buffalo' : 'Mixed'}</span>
+                  {selectedChannel === ch && <Check className="w-3 h-3 ml-auto text-emerald-400" />}
                 </button>
-                {/* Dropdown Menu */}
-                <div className="absolute left-0 top-full mt-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-                  <div className="bg-gray-800 rounded-xl border border-white/20 shadow-2xl overflow-hidden min-w-[140px]">
-                    {(['CH1', 'CH2', 'CH3'] as const).map((ch) => (
-                      <button
-                        key={ch}
-                        onClick={() => setSelectedChannel(ch)}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                          selectedChannel === ch
-                            ? ch === 'CH1' ? 'bg-emerald-500/20 text-emerald-400' : ch === 'CH2' ? 'bg-blue-500/20 text-blue-400' : 'bg-amber-500/20 text-amber-400'
-                            : 'text-white/70 hover:bg-white/5'
-                        }`}
-                      >
-                        <span>{ch === 'CH1' ? '🐄' : ch === 'CH2' ? '🐃' : '🔀'}</span>
-                        <span className="text-sm font-medium">{ch === 'CH1' ? 'Cow' : ch === 'CH2' ? 'Buffalo' : 'Mixed'}</span>
-                        {selectedChannel === ch && <Check className="w-4 h-4 ml-auto" />}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              ))}
             </div>
+          </div>
+        </div>
 
-            {/* Center - History Navigator */}
-            {readingHistory.length > 1 && (
-              <div className="flex items-center gap-2">
-                <button onClick={goToPreviousReading} disabled={historyIndex >= readingHistory.length - 1}
-                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 transition-colors">
-                  <ChevronLeft className="w-5 h-5 text-white" />
-                </button>
-                <button onClick={goToLiveReading}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-                    isViewingHistory
-                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                      : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                  }`}>
-                  {isViewingHistory ? (
-                    <span className="flex items-center gap-2"><History className="w-4 h-4" />{historyIndex + 1}/{readingHistory.length}</span>
-                  ) : (
-                    <span className="flex items-center gap-2"><Activity className="w-4 h-4" />LIVE</span>
-                  )}
-                </button>
-                <button onClick={goToNextReading} disabled={historyIndex <= 0}
-                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 transition-colors">
-                  <ChevronRight className="w-5 h-5 text-white" />
-                </button>
-              </div>
-            )}
+        {/* Center - History Navigator */}
+        <div className="flex items-center gap-1">
+          {readingHistory.length > 1 && (
+            <button onClick={goToPreviousReading} disabled={historyIndex >= readingHistory.length - 1}
+              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-white/[0.06] disabled:opacity-20 transition-colors">
+              <ChevronLeft className="w-4 h-4 text-white/60" />
+            </button>
+          )}
+          <button onClick={goToLiveReading}
+            className={`px-4 py-1 rounded-full text-[11px] font-bold tracking-[0.15em] uppercase transition-all ${
+              isViewingHistory
+                ? 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/25'
+                : 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/25'
+            }`}>
+            {isViewingHistory ? `${historyIndex + 1} / ${readingHistory.length}` : '\u25CF LIVE'}
+          </button>
+          {readingHistory.length > 1 && (
+            <button onClick={goToNextReading} disabled={historyIndex <= 0}
+              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-white/[0.06] disabled:opacity-20 transition-colors">
+              <ChevronRight className="w-4 h-4 text-white/60" />
+            </button>
+          )}
+        </div>
 
-            {/* Right - Machine Switcher (Flutter-style) */}
-            <div className="flex items-center gap-2">
-              {/* Navigation arrows when multiple machines */}
-              {connectedBLEMachines.size > 1 && (
-                <button 
-                  onClick={() => {
-                    const machineIds = Array.from(connectedBLEMachines);
-                    const currentIdx = machineIds.indexOf(selectedMachineId || '');
-                    const prevIdx = currentIdx <= 0 ? machineIds.length - 1 : currentIdx - 1;
-                    setSelectedMachineId(machineIds[prevIdx]);
-                  }}
-                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-                >
-                  <ChevronLeft className="w-5 h-5 text-white" />
-                </button>
-              )}
-
-              {/* Current machine dropdown (Flutter PopupMenuButton style) */}
-              {connectedBLEMachines.size > 0 ? (
-                <div className="relative group">
-                  <button 
-                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
-                      selectedMachineId && connectedBLEMachines.has(selectedMachineId)
-                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
-                        : 'bg-red-500/15 border-red-500/40 text-red-400'
-                    }`}
-                  >
-                    <Bluetooth className={`w-4 h-4 ${selectedMachineId && connectedBLEMachines.has(selectedMachineId) ? 'text-emerald-400' : 'text-red-400'}`} />
-                    <span className="text-sm font-bold">M-{selectedMachineId || '--'}</span>
-                    {connectedBLEMachines.size > 1 && (
-                      <svg className="w-4 h-4 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    )}
-                  </button>
-                  
-                  {/* Dropdown menu (shows on hover like Flutter PopupMenu) */}
-                  {connectedBLEMachines.size > 1 && (
-                    <div className="absolute right-0 top-full mt-2 min-w-[200px] py-2 rounded-xl bg-gray-800/95 backdrop-blur-xl border border-white/20 shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-                      {Array.from(connectedBLEMachines).map((mId, index) => {
-                        const isSelected = selectedMachineId === mId;
-                        const lastReading = machineReadings.get(mId);
-                        const hasData = !!lastReading;
-                        
-                        return (
-                          <button 
-                            key={mId}
-                            onClick={() => setSelectedMachineId(mId)}
-                            className={`w-full px-4 py-3 flex items-center gap-3 transition-all hover:bg-white/10 ${
-                              isSelected ? 'bg-emerald-500/15' : ''
-                            }`}
-                          >
-                            {/* Serial number badge */}
-                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border ${
-                              isSelected 
-                                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' 
-                                : 'bg-white/10 border-white/20 text-white/60'
-                            }`}>
-                              {index + 1}
-                            </div>
-                            
-                            {/* Machine info */}
-                            <div className="flex-1 text-left">
-                              <div className="flex items-center gap-2">
-                                <span className={`text-sm font-bold ${isSelected ? 'text-emerald-400' : 'text-white'}`}>
-                                  Machine M-{mId}
-                                </span>
-                                {isSelected && (
-                                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                                )}
-                              </div>
-                              {hasData ? (
-                                <span className="text-xs text-cyan-400">
-                                  FAT: {lastReading.fat.toFixed(1)} | SNF: {lastReading.snf.toFixed(1)}
-                                </span>
-                              ) : (
-                                <span className="text-xs text-white/40">Connected</span>
-                              )}
-                            </div>
-                            
-                            {/* Check mark for selected */}
-                            {isSelected && (
-                              <Check className="w-4 h-4 text-emerald-400" />
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/20 text-white/40">
-                  <BluetoothOff className="w-4 h-4" />
-                  <span className="text-sm">No machines</span>
-                </div>
-              )}
-
-              {/* Navigation arrows when multiple machines */}
-              {connectedBLEMachines.size > 1 && (
-                <button 
-                  onClick={() => {
-                    const machineIds = Array.from(connectedBLEMachines);
-                    const currentIdx = machineIds.indexOf(selectedMachineId || '');
-                    const nextIdx = currentIdx >= machineIds.length - 1 ? 0 : currentIdx + 1;
-                    setSelectedMachineId(machineIds[nextIdx]);
-                  }}
-                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-                >
-                  <ChevronRight className="w-5 h-5 text-white" />
-                </button>
-              )}
-
-              {/* Dongle Status */}
-              <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border ${
-                connectedPort && isDongleVerified
-                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                  : 'bg-slate-500/20 text-slate-400 border-slate-500/40'
+        {/* Right cluster */}
+        <div className="flex items-center gap-2">
+          {/* Machine navigation arrows */}
+          {connectedBLEMachines.size > 1 && (
+            <button onClick={() => {
+              const ids = Array.from(connectedBLEMachines);
+              const idx = ids.indexOf(selectedMachineId || '');
+              setSelectedMachineId(ids[idx <= 0 ? ids.length - 1 : idx - 1]);
+            }} className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-white/[0.06] transition-colors">
+              <ChevronLeft className="w-4 h-4 text-white/50" />
+            </button>
+          )}
+          {/* Machine badge */}
+          {connectedBLEMachines.size > 0 ? (
+            <div className="relative group">
+              <button className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                selectedMachineId && connectedBLEMachines.has(selectedMachineId)
+                  ? 'bg-emerald-500/[0.08] border-emerald-500/20 text-emerald-400'
+                  : 'bg-red-500/[0.08] border-red-500/20 text-red-400'
               }`}>
-                <Usb className="w-4 h-4" />
-                <span className="text-sm font-medium">{connectedPort && isDongleVerified ? 'HUB Ready' : 'API Mode'}</span>
-              </div>
+                <Bluetooth className="w-3.5 h-3.5" />
+                <span>M-{selectedMachineId || '--'}</span>
+                {connectedBLEMachines.size > 1 && <ChevronRight className="w-3 h-3 opacity-40 rotate-90" />}
+              </button>
+              {connectedBLEMachines.size > 1 && (
+                <div className="absolute right-0 top-full mt-1.5 min-w-[220px] py-1.5 bg-[#111827] rounded-xl border border-white/[0.1] shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
+                  {Array.from(connectedBLEMachines).map((mId, index) => {
+                    const isSelected = selectedMachineId === mId;
+                    const lastReading = machineReadings.get(mId);
+                    return (
+                      <button key={mId} onClick={() => setSelectedMachineId(mId)}
+                        className={`w-full px-3 py-2.5 flex items-center gap-3 transition-colors hover:bg-white/[0.06] ${isSelected ? 'bg-white/[0.04]' : ''}`}>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ring-1 ${
+                          isSelected ? 'bg-emerald-500/15 ring-emerald-500/40 text-emerald-400' : 'bg-white/[0.06] ring-white/[0.1] text-white/50'
+                        }`}>{index + 1}</div>
+                        <div className="flex-1 text-left">
+                          <div className="text-xs font-semibold text-white/80">Machine M-{mId}</div>
+                          {lastReading ? (
+                            <span className="text-[10px] text-cyan-400/70">FAT {lastReading.fat.toFixed(1)} | SNF {lastReading.snf.toFixed(1)}</span>
+                          ) : (
+                            <span className="text-[10px] text-white/30">Connected</span>
+                          )}
+                        </div>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
+          ) : (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.03] text-white/30 text-xs">
+              <BluetoothOff className="w-3.5 h-3.5" />
+              <span>No machines</span>
+            </div>
+          )}
+          {connectedBLEMachines.size > 1 && (
+            <button onClick={() => {
+              const ids = Array.from(connectedBLEMachines);
+              const idx = ids.indexOf(selectedMachineId || '');
+              setSelectedMachineId(ids[idx >= ids.length - 1 ? 0 : idx + 1]);
+            }} className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-white/[0.06] transition-colors">
+              <ChevronRight className="w-4 h-4 text-white/50" />
+            </button>
+          )}
+          {/* Dongle indicator */}
+          <div className={`hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium ring-1 ${
+            connectedPort && isDongleVerified
+              ? 'bg-emerald-500/[0.06] text-emerald-400/80 ring-emerald-500/15'
+              : 'bg-white/[0.02] text-white/30 ring-white/[0.06]'
+          }`}>
+            <Usb className="w-3 h-3" />
+            <span>{connectedPort && isDongleVerified ? 'HUB' : 'API'}</span>
           </div>
         </div>
       </header>
@@ -1117,131 +1047,198 @@ export default function MachineControlPanelDashboard() {
       {/* Toast Messages */}
       <AnimatePresence>
         {(error || success) && (
-          <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50">
+          <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50">
             {error && <Toast type="error" message={error} onClose={() => setError('')} />}
             {success && <Toast type="success" message={success} onClose={() => setSuccess('')} />}
           </div>
         )}
       </AnimatePresence>
 
-      {/* Main Content */}
-      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-32">
-        {/* Channel & Actions Row */}
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-          <div className="flex items-center gap-3">
-            <select value={selectedChannel} onChange={(e) => setSelectedChannel(e.target.value as 'CH1' | 'CH2' | 'CH3')}
-              className="px-4 py-2.5 text-sm font-medium rounded-xl bg-white/5 border border-white/10 text-white appearance-none cursor-pointer hover:bg-white/10 transition-colors">
-              <option value="CH1" className="bg-gray-800">🐄 Cow (CH1)</option>
-              <option value="CH2" className="bg-gray-800">🐃 Buffalo (CH2)</option>
-              <option value="CH3" className="bg-gray-800">🥛 Mixed (CH3)</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => router.push(`/admin/machine/${machineDbId}?tab=analytics`)}
-              className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl bg-purple-500/15 text-purple-400 border border-purple-500/30 hover:bg-purple-500/25 transition-colors">
-              <BarChart3 className="w-4 h-4" />Reports
-            </button>
-            <button onClick={() => { setMachineReadings(new Map()); }}
-              className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 transition-colors">
-              <RefreshCw className="w-4 h-4" />Clear
-            </button>
-          </div>
-        </div>
+      {/* ===== MAIN DASHBOARD ===== */}
+      <main className="relative z-10 flex-1 min-h-0 p-2.5 lg:p-3.5">
+        <div className="h-full grid grid-cols-1 lg:grid-cols-[240px_1fr_240px] xl:grid-cols-[280px_1fr_280px] gap-2.5 lg:gap-3">
 
-        {/* Info Strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <InfoCard icon={<FileText className="w-5 h-5" />} label="Tests Today" value={todayStats.totalTests.toString()} color="blue" />
-          <InfoCard icon={<Settings className="w-5 h-5" />} label="Machine" value={selectedMachineId ? `M-${selectedMachineId}` : '--'} color="emerald" />
-          <InfoCard icon={<User className="w-5 h-5" />} label="Farmer ID" value={formatFarmerId(displayedReading.farmerId)} color="cyan" />
-          <InfoCard icon={<Award className="w-5 h-5" />} label="Bonus" value={`₹${displayedReading.incentive.toFixed(2)}`} color="purple" />
-        </div>
-
-        {/* Primary Readings Section */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-white/50 uppercase tracking-wider">Milk Quality</span>
-            <span className={`text-xs font-medium ${isViewingHistory ? 'text-amber-400' : 'text-white/40'}`}>{formatTimestamp(displayedReading.timestamp)}</span>
+          {/* ========== LEFT PANEL - Primary Gauges ========== */}
+          <div className="hidden lg:flex flex-col gap-2.5">
+            <PrimaryGaugeCard title="FAT" value={displayedReading.fat} unit="%" color="amber" maxValue={12} icon={<Droplet className="w-5 h-5" />} />
+            <PrimaryGaugeCard title="SNF" value={displayedReading.snf} unit="%" color="sky" maxValue={15} icon={<Gauge className="w-5 h-5" />} />
+            <PrimaryGaugeCard title="CLR" value={displayedReading.clr} unit="" color="violet" maxValue={100} icon={<Beaker className="w-5 h-5" />} />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <GlassReadingCard title="FAT" value={displayedReading.fat} unit="%" color="amber" maxValue={15} icon={<Droplet className="w-6 h-6" />} decimals={2} />
-            <GlassReadingCard title="SNF" value={displayedReading.snf} unit="%" color="blue" maxValue={15} icon={<Gauge className="w-6 h-6" />} decimals={2} />
-            <GlassReadingCard title="CLR" value={displayedReading.clr} unit="" color="purple" maxValue={100} icon={<Beaker className="w-6 h-6" />} decimals={1} />
-          </div>
-        </div>
 
-        {/* Transaction Section */}
-        <div className="mb-4">
-          <span className="block text-xs font-bold text-white/50 uppercase tracking-wider mb-3">Transaction</span>
-          <div className="grid grid-cols-3 gap-4 items-center">
-            <TransactionItem label="Quantity" value={displayedReading.quantity.toFixed(2)} unit="L" color="cyan" />
-            <TransactionItem label="Rate" value={`₹${displayedReading.rate.toFixed(2)}`} unit="/L" color="amber" />
-            <div className="relative bg-gradient-to-br from-emerald-500/20 to-teal-500/20 backdrop-blur-xl rounded-2xl border border-emerald-500/30 p-4 text-center">
-              <span className="text-xs text-emerald-400/80 uppercase tracking-wider block mb-1">Total</span>
-              <span className="text-3xl font-black text-emerald-400">₹{displayedReading.totalAmount.toFixed(2)}</span>
+          {/* ========== CENTER PANEL ========== */}
+          <div className="flex flex-col gap-2.5 min-h-0 overflow-y-auto lg:overflow-hidden custom-scrollbar">
+
+            {/* Mobile: primary readings row */}
+            <div className="lg:hidden grid grid-cols-3 gap-2">
+              <MobileGaugeCard title="FAT" value={displayedReading.fat} unit="%" color="amber" />
+              <MobileGaugeCard title="SNF" value={displayedReading.snf} unit="%" color="sky" />
+              <MobileGaugeCard title="CLR" value={displayedReading.clr} unit="" color="violet" />
+            </div>
+
+            {/* Info chips strip */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <DashInfoChip icon={<FileText className="w-3.5 h-3.5" />} label="Tests" value={todayStats.totalTests.toString()} accent="sky" />
+              <DashInfoChip icon={<Zap className="w-3.5 h-3.5" />} label="Machine" value={selectedMachineId ? `M-${selectedMachineId}` : '--'} accent="emerald" />
+              <DashInfoChip icon={<User className="w-3.5 h-3.5" />} label="Farmer" value={formatFarmerId(displayedReading.farmerId)} accent="cyan" />
+              <DashInfoChip icon={<Award className="w-3.5 h-3.5" />} label="Bonus" value={`\u20B9${displayedReading.incentive.toFixed(0)}`} accent="violet" />
+            </div>
+
+            {/* Transaction Block */}
+            <div className="bg-white/[0.025] rounded-2xl border border-white/[0.05] px-4 py-3.5 lg:py-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-center flex-1 min-w-0">
+                  <div className="text-[10px] text-white/30 uppercase tracking-[0.2em] mb-1 font-medium">Quantity</div>
+                  <div className="text-xl lg:text-2xl font-bold tabular-nums text-white/90">{displayedReading.quantity.toFixed(2)}<span className="text-xs text-white/30 ml-1 font-normal">L</span></div>
+                </div>
+                <div className="text-white/[0.12] text-xl font-extralight select-none">&times;</div>
+                <div className="text-center flex-1 min-w-0">
+                  <div className="text-[10px] text-white/30 uppercase tracking-[0.2em] mb-1 font-medium">Rate</div>
+                  <div className="text-xl lg:text-2xl font-bold tabular-nums text-white/90">{'\u20B9'}{displayedReading.rate.toFixed(2)}<span className="text-xs text-white/30 ml-1 font-normal">/L</span></div>
+                </div>
+                <div className="text-white/[0.12] text-xl font-extralight select-none">=</div>
+                <div className="text-center flex-1 min-w-0 bg-emerald-500/[0.06] rounded-xl py-2 ring-1 ring-emerald-500/[0.12]">
+                  <div className="text-[10px] text-emerald-400/50 uppercase tracking-[0.2em] mb-1 font-medium">Total</div>
+                  <div className="text-xl lg:text-2xl font-black tabular-nums text-emerald-400">{'\u20B9'}{displayedReading.totalAmount.toFixed(2)}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Trend Chart */}
+            <div className="flex-1 min-h-[100px] bg-white/[0.025] rounded-2xl border border-white/[0.05] p-3.5 flex flex-col">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-white/30 uppercase tracking-[0.2em] font-medium">Live Trend</span>
+                  <span className="text-[10px] text-white/20">&middot; {getTodayDateString()}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-sm bg-amber-400/70" /><span className="text-[9px] text-white/30">FAT</span></div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-sm bg-sky-400/70" /><span className="text-[9px] text-white/30">SNF</span></div>
+                </div>
+              </div>
+              <div className="flex-1 min-h-0">
+                {readingHistory.length > 0 ? (
+                  <DashTrendChart readings={readingHistory} />
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-white/15">
+                    <Waves className="w-8 h-8 mb-1.5" />
+                    <span className="text-[11px]">Waiting for data...</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Stats Row */}
+            {todayStats.totalTests > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <DashStatChip label="Total Qty" value={`${todayStats.totalQuantity.toFixed(0)}L`} icon={<Scale className="w-3 h-3" />} />
+                <DashStatChip label="Revenue" value={`\u20B9${todayStats.totalAmount.toFixed(0)}`} icon={<Award className="w-3 h-3" />} />
+                <DashStatChip label="Avg FAT" value={`${todayStats.avgFat.toFixed(2)}%`} icon={<TrendingUp className="w-3 h-3" />} />
+                <DashStatChip label="Avg SNF" value={`${todayStats.avgSnf.toFixed(2)}%`} icon={<TrendingDown className="w-3 h-3" />} />
+              </div>
+            )}
+
+            {/* Mobile: Parameters row */}
+            <div className="lg:hidden">
+              <div className="bg-white/[0.025] rounded-2xl border border-white/[0.05] p-3">
+                <span className="text-[10px] text-white/25 uppercase tracking-[0.2em] font-medium block mb-2">Parameters</span>
+                <div className="grid grid-cols-3 gap-2">
+                  <MobileParamItem label="Type" value={displayedReading.milkType === 'cow' ? 'Cow' : displayedReading.milkType === 'buffalo' ? 'Buffalo' : 'Mixed'} />
+                  <MobileParamItem label="Protein" value={`${displayedReading.protein.toFixed(2)}%`} />
+                  <MobileParamItem label="Lactose" value={`${displayedReading.lactose.toFixed(2)}%`} />
+                  <MobileParamItem label="Salt" value={`${displayedReading.salt.toFixed(2)}%`} />
+                  <MobileParamItem label="Water" value={`${displayedReading.water.toFixed(2)}%`} />
+                  <MobileParamItem label="Temp" value={`${displayedReading.temperature.toFixed(1)}\u00B0C`} />
+                </div>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Other Parameters Grid */}
-        <div className="mb-4">
-          <span className="block text-xs font-bold text-white/50 uppercase tracking-wider mb-3">Other Parameters</span>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <ParameterCard icon={<Droplet className="w-4 h-4" />} label="Milk Type" value={displayedReading.milkType === 'cow' ? 'Cow' : displayedReading.milkType === 'buffalo' ? 'Buffalo' : 'Mixed'} color="green" />
-            <ParameterCard icon={<FlaskConical className="w-4 h-4" />} label="Protein" value={`${displayedReading.protein.toFixed(2)}%`} color="red" />
-            <ParameterCard icon={<Beaker className="w-4 h-4" />} label="Lactose" value={`${displayedReading.lactose.toFixed(2)}%`} color="pink" />
-            <ParameterCard icon={<Gauge className="w-4 h-4" />} label="Salt" value={`${displayedReading.salt.toFixed(2)}%`} color="slate" />
-            <ParameterCard icon={<Droplets className="w-4 h-4" />} label="Water" value={`${displayedReading.water.toFixed(2)}%`} color="teal" />
-            <ParameterCard icon={<Thermometer className="w-4 h-4" />} label="Temp" value={`${displayedReading.temperature.toFixed(1)}°C`} color="orange" />
-          </div>
-        </div>
+          {/* ========== RIGHT PANEL - Parameters ========== */}
+          <div className="hidden lg:flex flex-col gap-2.5">
+            {/* Timestamp */}
+            <div className="bg-white/[0.025] rounded-xl border border-white/[0.05] px-3.5 py-2.5 flex items-center gap-2">
+              <Clock className="w-3.5 h-3.5 text-white/25" />
+              <span className={`text-[11px] font-medium ${isViewingHistory ? 'text-amber-400/80' : 'text-white/40'}`}>
+                {formatTimestamp(displayedReading.timestamp)}
+              </span>
+            </div>
 
-        {/* Live Trend Graph */}
-        <div className="mb-4">
-          <span className="block text-xs font-bold text-white/50 uppercase tracking-wider mb-3">Live Trend ({getTodayDateString()})</span>
-          <div className="bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10 p-4 h-48 flex items-center justify-center">
-            {readingHistory.length > 0 ? (
-              <div className="w-full h-full">
-                <TrendChart readings={readingHistory} />
+            {/* Milk type badge */}
+            <div className={`rounded-xl border px-3.5 py-2.5 flex items-center gap-2.5 ${
+              displayedReading.milkType === 'cow' ? 'bg-emerald-500/[0.04] border-emerald-500/[0.1]'
+              : displayedReading.milkType === 'buffalo' ? 'bg-sky-500/[0.04] border-sky-500/[0.1]'
+              : 'bg-amber-500/[0.04] border-amber-500/[0.1]'
+            }`}>
+              <span className="text-base">{displayedReading.milkType === 'cow' ? '🐄' : displayedReading.milkType === 'buffalo' ? '🐃' : '🔀'}</span>
+              <div>
+                <div className="text-[10px] text-white/30 uppercase tracking-widest">Milk Type</div>
+                <div className="text-xs font-semibold text-white/80">{displayedReading.milkType === 'cow' ? 'Cow' : displayedReading.milkType === 'buffalo' ? 'Buffalo' : 'Mixed'}</div>
               </div>
-            ) : (
-              <div className="text-center text-white/40">
-                <Waves className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No readings yet</p>
+            </div>
+
+            {/* Parameters list */}
+            <div className="flex-1 bg-white/[0.025] rounded-2xl border border-white/[0.05] p-3 flex flex-col">
+              <span className="text-[10px] text-white/25 uppercase tracking-[0.2em] font-medium mb-2.5 px-0.5">Analysis</span>
+              <div className="flex flex-col gap-1.5 flex-1">
+                <DashParamRow icon={<FlaskConical className="w-3.5 h-3.5" />} label="Protein" value={`${displayedReading.protein.toFixed(2)}%`} color="rose" />
+                <DashParamRow icon={<Beaker className="w-3.5 h-3.5" />} label="Lactose" value={`${displayedReading.lactose.toFixed(2)}%`} color="pink" />
+                <DashParamRow icon={<Gauge className="w-3.5 h-3.5" />} label="Salt" value={`${displayedReading.salt.toFixed(2)}%`} color="slate" />
+                <DashParamRow icon={<Droplets className="w-3.5 h-3.5" />} label="Water" value={`${displayedReading.water.toFixed(2)}%`} color="teal" />
+                <DashParamRow icon={<Thermometer className="w-3.5 h-3.5" />} label="Temperature" value={`${displayedReading.temperature.toFixed(1)}\u00B0C`} color="orange" />
+              </div>
+            </div>
+
+            {/* Quick stats summary */}
+            {todayStats.totalTests > 0 && (
+              <div className="bg-white/[0.025] rounded-xl border border-white/[0.05] p-3">
+                <span className="text-[10px] text-white/25 uppercase tracking-[0.2em] font-medium block mb-2 px-0.5">Ranges</span>
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-white/35">FAT Range</span>
+                    <span className="text-white/60 font-medium tabular-nums">{todayStats.lowestFat.toFixed(1)} - {todayStats.highestFat.toFixed(1)}%</span>
+                  </div>
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-white/35">SNF Range</span>
+                    <span className="text-white/60 font-medium tabular-nums">{todayStats.lowestSnf.toFixed(1)} - {todayStats.highestSnf.toFixed(1)}%</span>
+                  </div>
+                </div>
               </div>
             )}
           </div>
         </div>
-
-        {/* Today's Stats */}
-        {todayStats.totalTests > 0 && (
-          <div className="mb-4">
-            <span className="block text-xs font-bold text-white/50 uppercase tracking-wider mb-3">Today's Stats</span>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <StatCard label="Total Qty" value={`${todayStats.totalQuantity.toFixed(1)} L`} icon={<Scale className="w-4 h-4" />} />
-              <StatCard label="Revenue" value={`₹${todayStats.totalAmount.toFixed(0)}`} icon={<Award className="w-4 h-4" />} />
-              <StatCard label="Avg FAT" value={`${todayStats.avgFat.toFixed(2)}%`} icon={<TrendingUp className="w-4 h-4" />} />
-              <StatCard label="Avg SNF" value={`${todayStats.avgSnf.toFixed(2)}%`} icon={<TrendingDown className="w-4 h-4" />} />
-            </div>
-          </div>
-        )}
       </main>
 
-      {/* Bottom Command Bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 backdrop-blur-xl bg-gray-900/90 border-t border-white/10 px-4 py-4 safe-area-pb">
-        <div className="max-w-2xl mx-auto grid grid-cols-4 gap-3">
-          <CommandButton icon={isTestRunning ? <Timer className="w-6 h-6" /> : <Play className="w-6 h-6" />}
-            label={isTestRunning ? `${testElapsedSeconds}s` : 'Test'} color="emerald"
-            onClick={isTestRunning ? undefined : handleTest} isActive={isTestRunning} />
-          <CommandButton icon={<Check className="w-6 h-6" />} label="OK" color="blue" onClick={handleOk} />
-          <CommandButton icon={<X className="w-6 h-6" />} label="Cancel" color="amber" onClick={handleCancel} />
-          <CommandButton icon={<Droplets className="w-6 h-6" />} label="Clean" color="purple" onClick={handleClean} />
-        </div>
+      {/* ===== BOTTOM COMMAND BAR ===== */}
+      <div className="relative z-40 flex-shrink-0 h-[68px] flex items-center justify-center gap-2.5 sm:gap-3 px-3 sm:px-5 bg-white/[0.02] backdrop-blur-2xl border-t border-white/[0.06]">
+        <DashCmdButton
+          icon={isTestRunning ? <Timer className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+          label={isTestRunning ? `${testElapsedSeconds}s` : 'Test'}
+          color="emerald" onClick={isTestRunning ? undefined : handleTest} isActive={isTestRunning}
+        />
+        <DashCmdButton icon={<Check className="w-5 h-5" />} label="OK" color="sky" onClick={handleOk} />
+        <DashCmdButton icon={<X className="w-5 h-5" />} label="Cancel" color="amber" onClick={handleCancel} />
+        <DashCmdButton icon={<Droplets className="w-5 h-5" />} label="Clean" color="violet" onClick={handleClean} />
+
+        <div className="hidden sm:block h-8 w-px bg-white/[0.06] mx-1" />
+
+        <button
+          onClick={() => router.push(`/admin/machine/${machineDbId}?tab=analytics`)}
+          className="hidden sm:flex items-center gap-2 px-4 h-10 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-white/40 hover:text-white/60 text-xs font-medium transition-all"
+        >
+          <BarChart3 className="w-3.5 h-3.5" />Reports
+        </button>
+        <button
+          onClick={() => { setMachineReadings(new Map()); }}
+          className="hidden sm:flex items-center gap-2 px-3.5 h-10 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-white/40 hover:text-white/60 text-xs font-medium transition-all"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />Clear
+        </button>
       </div>
 
       {/* Farmer ID Dialog */}
       <AnimatePresence>
         {showFarmerIdDialog && (
-          <FarmerIdDialogComponent 
+          <FarmerIdDialogComponent
             machineIds={Array.from(connectedBLEMachines.keys()).filter(id => !(machineFarmerIdMode.get(id) ?? false))}
             machineWeighingScaleMode={machineWeighingScaleMode}
             formatMachineId={formatMachineId}
@@ -1283,248 +1280,249 @@ export default function MachineControlPanelDashboard() {
   );
 }
 
-// ============================================
-// Sub-Components
-// ============================================
+// ============================================================================
+// Sub-Components — Redesigned Dashboard UI
+// ============================================================================
 
-function InfoCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color: string }) {
-  const colorMap: { [key: string]: string } = {
-    blue: 'from-blue-500/20 to-blue-600/10 border-blue-500/30 text-blue-400',
-    emerald: 'from-emerald-500/20 to-emerald-600/10 border-emerald-500/30 text-emerald-400',
-    cyan: 'from-cyan-500/20 to-cyan-600/10 border-cyan-500/30 text-cyan-400',
-    purple: 'from-purple-500/20 to-purple-600/10 border-purple-500/30 text-purple-400',
+/** Primary gauge card — large reading display for desktop left panel */
+function PrimaryGaugeCard({ title, value, unit, color, maxValue, icon }: {
+  title: string; value: number; unit: string; color: string; maxValue: number; icon: React.ReactNode;
+}) {
+  const progress = Math.min(Math.max(value / maxValue, 0), 1);
+  const colorMap: Record<string, { accent: string; bar: string; dim: string; glow: string; ring: string }> = {
+    amber:  { accent: 'text-amber-400',  bar: 'bg-amber-400',  dim: 'text-amber-400/50',  glow: 'bg-amber-400/[0.04]',  ring: 'border-amber-500/[0.08]' },
+    sky:    { accent: 'text-sky-400',    bar: 'bg-sky-400',    dim: 'text-sky-400/50',    glow: 'bg-sky-400/[0.04]',    ring: 'border-sky-500/[0.08]' },
+    violet: { accent: 'text-violet-400', bar: 'bg-violet-400', dim: 'text-violet-400/50', glow: 'bg-violet-400/[0.04]', ring: 'border-violet-500/[0.08]' },
   };
-  return (
-    <div className={`bg-gradient-to-br ${colorMap[color]} backdrop-blur-xl rounded-xl border p-3 flex items-center gap-3`}>
-      <div className={`p-2 rounded-lg bg-${color}-500/20`}>{icon}</div>
-      <div>
-        <span className="block text-[10px] uppercase tracking-wider text-white/50">{label}</span>
-        <span className="text-base font-bold text-white">{value}</span>
-      </div>
-    </div>
-  );
-}
+  const c = colorMap[color] || colorMap.amber;
 
-function GlassReadingCard({ title, value, unit, color, maxValue, icon, decimals = 2 }: { title: string; value: number; unit: string; color: string; maxValue: number; icon: React.ReactNode; decimals?: number }) {
-  const progress = Math.min(value / maxValue, 1);
-  const colorMap: { [key: string]: { bg: string; border: string; text: string; glow: string } } = {
-    amber: { bg: 'from-amber-500/20 to-amber-600/10', border: 'border-amber-500/40', text: 'text-amber-400', glow: 'bg-amber-500' },
-    blue: { bg: 'from-blue-500/20 to-blue-600/10', border: 'border-blue-500/40', text: 'text-blue-400', glow: 'bg-blue-500' },
-    purple: { bg: 'from-purple-500/20 to-purple-600/10', border: 'border-purple-500/40', text: 'text-purple-400', glow: 'bg-purple-500' },
-  };
-  const c = colorMap[color];
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-      className={`relative bg-gradient-to-br ${c.bg} backdrop-blur-xl rounded-2xl border ${c.border} p-5 overflow-hidden`}>
-      {/* Glow accent */}
-      <div className={`absolute top-0 left-0 right-0 h-1 ${c.glow} opacity-60`} style={{ width: `${progress * 100}%` }} />
-      
-      <div className="flex items-center justify-between mb-4">
-        <div className={`p-2 rounded-xl bg-white/10 ${c.text}`}>{icon}</div>
-        <span className={`text-xs font-bold uppercase tracking-wider ${c.text}`}>{title}</span>
+    <motion.div
+      initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.4 }}
+      className={`flex-1 ${c.glow} rounded-2xl border ${c.ring} p-4 flex flex-col items-center justify-center relative overflow-hidden`}
+    >
+      {/* Accent line at top */}
+      <div className={`absolute top-0 left-0 h-[2px] ${c.bar} opacity-40 transition-all duration-700`} style={{ width: `${progress * 100}%` }} />
+
+      {/* Header */}
+      <div className="flex items-center gap-2 self-start mb-auto">
+        <div className={c.accent}>{icon}</div>
+        <span className={`text-[10px] font-bold uppercase tracking-[0.25em] ${c.dim}`}>{title}</span>
       </div>
-      
-      {/* Circular Progress */}
-      <div className="relative w-24 h-24 mx-auto mb-3">
-        <svg className="w-full h-full transform -rotate-90">
-          <circle cx="48" cy="48" r="42" fill="none" stroke="currentColor" strokeWidth="6" className="text-white/10" />
-          <circle cx="48" cy="48" r="42" fill="none" stroke="currentColor" strokeWidth="6"
-            className={c.text} strokeLinecap="round"
-            strokeDasharray={`${progress * 264} 264`} style={{ transition: 'stroke-dasharray 0.5s ease' }} />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-3xl font-black text-white">{value.toFixed(decimals)}</span>
-          <span className="text-xs text-white/60">{unit}</span>
+
+      {/* Large value */}
+      <div className="flex items-baseline gap-1 my-auto">
+        <span className={`text-[3.2rem] leading-none font-black tabular-nums tracking-tight ${c.accent}`}>
+          {value.toFixed(title === 'CLR' ? 1 : 2)}
+        </span>
+        {unit && <span className={`text-lg font-medium ${c.dim}`}>{unit}</span>}
+      </div>
+
+      {/* Progress bar */}
+      <div className="w-full mt-auto">
+        <div className="h-[3px] bg-white/[0.04] rounded-full overflow-hidden">
+          <motion.div
+            initial={{ width: 0 }} animate={{ width: `${progress * 100}%` }}
+            transition={{ duration: 0.6, ease: 'easeOut' }}
+            className={`h-full ${c.bar} rounded-full opacity-50`}
+          />
         </div>
-      </div>
-      
-      {/* Progress Bar */}
-      <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-        <motion.div initial={{ width: 0 }} animate={{ width: `${progress * 100}%` }}
-          className={`h-full ${c.glow} rounded-full`} transition={{ duration: 0.5 }} />
+        <div className="flex justify-between mt-1">
+          <span className="text-[8px] text-white/15 tabular-nums">0</span>
+          <span className="text-[8px] text-white/15 tabular-nums">{maxValue}</span>
+        </div>
       </div>
     </motion.div>
   );
 }
 
-function TransactionItem({ label, value, unit, color }: { label: string; value: string; unit: string; color: string }) {
-  const colorClasses: { [key: string]: string } = {
-    cyan: 'from-cyan-500/20 to-cyan-600/10 border-cyan-500/30 text-cyan-400',
-    amber: 'from-amber-500/20 to-amber-600/10 border-amber-500/30 text-amber-400',
+/** Compact gauge card for mobile */
+function MobileGaugeCard({ title, value, unit, color }: {
+  title: string; value: number; unit: string; color: string;
+}) {
+  const colorMap: Record<string, { accent: string; bg: string; ring: string }> = {
+    amber:  { accent: 'text-amber-400',  bg: 'bg-amber-500/[0.06]',  ring: 'border-amber-500/[0.1]' },
+    sky:    { accent: 'text-sky-400',    bg: 'bg-sky-500/[0.06]',    ring: 'border-sky-500/[0.1]' },
+    violet: { accent: 'text-violet-400', bg: 'bg-violet-500/[0.06]', ring: 'border-violet-500/[0.1]' },
   };
+  const c = colorMap[color] || colorMap.amber;
+
   return (
-    <div className={`bg-gradient-to-br ${colorClasses[color]} backdrop-blur-xl rounded-2xl border p-4 text-center`}>
-      <span className="text-xs text-white/50 uppercase tracking-wider block mb-1">{label}</span>
-      <span className="text-xl font-bold text-white">{value}</span>
-      <span className="text-xs text-white/40 ml-1">{unit}</span>
+    <div className={`${c.bg} rounded-xl border ${c.ring} p-3 text-center`}>
+      <div className="text-[9px] text-white/30 uppercase tracking-[0.2em] font-bold mb-1">{title}</div>
+      <div className={`text-2xl font-black tabular-nums ${c.accent}`}>
+        {value.toFixed(title === 'CLR' ? 1 : 2)}
+      </div>
+      {unit && <div className="text-[10px] text-white/25">{unit}</div>}
     </div>
   );
 }
 
-function ParameterCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color: string }) {
-  const colorMap: { [key: string]: string } = {
-    green: 'border-green-500/30 text-green-400',
-    red: 'border-red-500/30 text-red-400',
-    pink: 'border-pink-500/30 text-pink-400',
-    slate: 'border-slate-500/30 text-slate-400',
-    teal: 'border-teal-500/30 text-teal-400',
-    orange: 'border-orange-500/30 text-orange-400',
+/** Info chip for the metrics strip */
+function DashInfoChip({ icon, label, value, accent }: {
+  icon: React.ReactNode; label: string; value: string; accent: string;
+}) {
+  const accentMap: Record<string, string> = {
+    sky: 'text-sky-400/70',
+    emerald: 'text-emerald-400/70',
+    cyan: 'text-cyan-400/70',
+    violet: 'text-violet-400/70',
   };
+
   return (
-    <div className={`bg-white/5 backdrop-blur-xl rounded-xl border ${colorMap[color]} p-3 flex items-center gap-2`}>
-      <div className={`p-1.5 rounded-lg bg-white/10 ${colorMap[color]}`}>{icon}</div>
-      <div>
-        <span className="block text-[9px] uppercase tracking-wider text-white/40">{label}</span>
-        <span className="text-sm font-bold text-white">{value}</span>
+    <div className="bg-white/[0.025] rounded-xl border border-white/[0.05] px-3 py-2 flex items-center gap-2.5">
+      <div className={accentMap[accent] || 'text-white/40'}>{icon}</div>
+      <div className="min-w-0">
+        <div className="text-[9px] text-white/25 uppercase tracking-[0.15em] font-medium">{label}</div>
+        <div className="text-sm font-bold text-white/85 truncate tabular-nums">{value}</div>
       </div>
     </div>
   );
 }
 
-function StatCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+/** Stat chip for the bottom stats bar */
+function DashStatChip({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
-    <div className="bg-white/5 backdrop-blur-xl rounded-xl border border-white/10 p-3">
-      <div className="flex items-center gap-2 text-white/40 mb-1">{icon}<span className="text-[10px] uppercase">{label}</span></div>
-      <span className="text-lg font-bold text-white">{value}</span>
+    <div className="bg-white/[0.025] rounded-xl border border-white/[0.05] px-3 py-2">
+      <div className="flex items-center gap-1.5 text-white/25 mb-0.5">
+        {icon}
+        <span className="text-[9px] uppercase tracking-wider font-medium">{label}</span>
+      </div>
+      <span className="text-sm font-bold text-white/80 tabular-nums">{value}</span>
     </div>
   );
 }
 
-function CommandButton({ icon, label, color, onClick, isActive }: { icon: React.ReactNode; label: string; color: string; onClick?: () => void; isActive?: boolean }) {
-  const colorMap: { [key: string]: { bg: string; hover: string; text: string; activeBg: string } } = {
-    emerald: { bg: 'bg-emerald-500/20', hover: 'hover:bg-emerald-500/30', text: 'text-emerald-400', activeBg: 'bg-emerald-500/40' },
-    blue: { bg: 'bg-blue-500/20', hover: 'hover:bg-blue-500/30', text: 'text-blue-400', activeBg: 'bg-blue-500/40' },
-    amber: { bg: 'bg-amber-500/20', hover: 'hover:bg-amber-500/30', text: 'text-amber-400', activeBg: 'bg-amber-500/40' },
-    purple: { bg: 'bg-purple-500/20', hover: 'hover:bg-purple-500/30', text: 'text-purple-400', activeBg: 'bg-purple-500/40' },
+/** Parameter row for the right panel */
+function DashParamRow({ icon, label, value, color }: {
+  icon: React.ReactNode; label: string; value: string; color: string;
+}) {
+  const colorMap: Record<string, { icon: string; value: string }> = {
+    rose:   { icon: 'text-rose-400/60',   value: 'text-rose-300/80' },
+    pink:   { icon: 'text-pink-400/60',   value: 'text-pink-300/80' },
+    slate:  { icon: 'text-slate-400/60',  value: 'text-slate-300/80' },
+    teal:   { icon: 'text-teal-400/60',   value: 'text-teal-300/80' },
+    orange: { icon: 'text-orange-400/60', value: 'text-orange-300/80' },
   };
-  const c = colorMap[color];
+  const c = colorMap[color] || colorMap.slate;
+
   return (
-    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={onClick} disabled={isActive}
-      className={`flex flex-col items-center justify-center gap-1.5 py-3 px-2 rounded-2xl border border-white/10 transition-colors ${isActive ? c.activeBg : c.bg} ${!isActive && c.hover} ${c.text} ${isActive ? 'animate-pulse' : ''}`}>
+    <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
+      <div className={c.icon}>{icon}</div>
+      <span className="text-[11px] text-white/35 flex-1">{label}</span>
+      <span className={`text-[12px] font-semibold tabular-nums ${c.value}`}>{value}</span>
+    </div>
+  );
+}
+
+/** Mobile parameter item */
+function MobileParamItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="text-center py-1.5">
+      <div className="text-[9px] text-white/25 uppercase tracking-wider">{label}</div>
+      <div className="text-xs font-semibold text-white/70 tabular-nums mt-0.5">{value}</div>
+    </div>
+  );
+}
+
+/** Command button for the bottom bar */
+function DashCmdButton({ icon, label, color, onClick, isActive }: {
+  icon: React.ReactNode; label: string; color: string; onClick?: () => void; isActive?: boolean;
+}) {
+  const colorMap: Record<string, { base: string; active: string; text: string; ring: string }> = {
+    emerald: { base: 'bg-emerald-500/[0.08] hover:bg-emerald-500/[0.15]', active: 'bg-emerald-500/20', text: 'text-emerald-400', ring: 'ring-emerald-500/20' },
+    sky:     { base: 'bg-sky-500/[0.08] hover:bg-sky-500/[0.15]',         active: 'bg-sky-500/20',     text: 'text-sky-400',     ring: 'ring-sky-500/20' },
+    amber:   { base: 'bg-amber-500/[0.08] hover:bg-amber-500/[0.15]',     active: 'bg-amber-500/20',   text: 'text-amber-400',   ring: 'ring-amber-500/20' },
+    violet:  { base: 'bg-violet-500/[0.08] hover:bg-violet-500/[0.15]',   active: 'bg-violet-500/20',  text: 'text-violet-400',  ring: 'ring-violet-500/20' },
+  };
+  const c = colorMap[color] || colorMap.emerald;
+
+  return (
+    <motion.button
+      whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+      onClick={onClick} disabled={isActive}
+      className={`flex items-center gap-2 px-5 sm:px-6 py-2.5 rounded-xl ring-1 ${c.ring} ${isActive ? c.active : c.base} ${c.text} font-semibold text-sm transition-all ${isActive ? 'animate-pulse' : ''}`}
+    >
       {icon}
-      <span className="text-xs font-semibold uppercase tracking-wider">{label}</span>
+      <span className="tracking-wide hidden sm:inline">{label}</span>
+      <span className="tracking-wide sm:hidden text-xs">{label}</span>
     </motion.button>
   );
 }
 
-function TrendChart({ readings }: { readings: MilkReading[] }) {
+/** Trend chart — bar chart showing FAT and SNF history */
+function DashTrendChart({ readings }: { readings: MilkReading[] }) {
   const last20 = readings.slice(-20);
-  if (last20.length < 2) return <div className="flex items-center justify-center h-full text-white/40 text-sm">Need at least 2 readings</div>;
+  if (last20.length < 2) {
+    return <div className="flex items-center justify-center h-full text-white/20 text-[11px]">Need 2+ readings</div>;
+  }
 
-  const maxFat = Math.max(...last20.map(r => r.fat), 10);
-  const maxSnf = Math.max(...last20.map(r => r.snf), 15);
-  const maxVal = Math.max(maxFat, maxSnf);
+  const maxFat = Math.max(...last20.map(r => r.fat), 8);
+  const maxSnf = Math.max(...last20.map(r => r.snf), 12);
+  const maxVal = Math.max(maxFat, maxSnf) * 1.1;
 
   return (
-    <div className="w-full h-full flex items-end gap-1">
+    <div className="w-full h-full flex items-end gap-[3px] px-1">
       {last20.map((r, i) => (
-        <div key={i} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
-          <div className="w-full flex flex-col gap-0.5 items-center" style={{ height: '100%' }}>
-            <div className="flex-1 w-full flex items-end justify-center gap-0.5">
-              <div className="w-1/3 bg-amber-500/80 rounded-t-sm transition-all" style={{ height: `${(r.fat / maxVal) * 100}%`, minHeight: 4 }} title={`FAT: ${r.fat.toFixed(2)}%`} />
-              <div className="w-1/3 bg-blue-500/80 rounded-t-sm transition-all" style={{ height: `${(r.snf / maxVal) * 100}%`, minHeight: 4 }} title={`SNF: ${r.snf.toFixed(2)}%`} />
-            </div>
-          </div>
+        <div key={i} className="flex-1 flex gap-[1px] items-end h-full" title={`FAT ${r.fat.toFixed(2)}% | SNF ${r.snf.toFixed(2)}%`}>
+          <div
+            className="flex-1 bg-amber-400/60 rounded-t-sm transition-all duration-300 hover:bg-amber-400/80 min-h-[2px]"
+            style={{ height: `${Math.max((r.fat / maxVal) * 100, 2)}%` }}
+          />
+          <div
+            className="flex-1 bg-sky-400/60 rounded-t-sm transition-all duration-300 hover:bg-sky-400/80 min-h-[2px]"
+            style={{ height: `${Math.max((r.snf / maxVal) * 100, 2)}%` }}
+          />
         </div>
       ))}
     </div>
   );
 }
 
-// Farmer ID Dialog Component
-function FarmerIdDialogComponent({ 
-  machineIds, 
-  machineWeighingScaleMode, 
-  formatMachineId, 
-  onComplete, 
-  onCancel 
-}: { 
-  machineIds: string[]; 
-  machineWeighingScaleMode: Map<string, boolean>; 
-  formatMachineId: (id: string) => string; 
-  onComplete: (farmerIds: Map<string, string>) => void; 
-  onCancel: () => void; 
+// ============================================================================
+// Dialog Components — Modernized styling, same functionality
+// ============================================================================
+
+function FarmerIdDialogComponent({
+  machineIds, machineWeighingScaleMode, formatMachineId, onComplete, onCancel
+}: {
+  machineIds: string[]; machineWeighingScaleMode: Map<string, boolean>;
+  formatMachineId: (id: string) => string;
+  onComplete: (farmerIds: Map<string, string>) => void; onCancel: () => void;
 }) {
   const [tempFarmerIds, setTempFarmerIds] = useState<Map<string, string>>(new Map());
-  
   const allFilled = machineIds.every(id => (tempFarmerIds.get(id) || '').trim() !== '');
   const hasManualWeight = machineIds.some(id => !(machineWeighingScaleMode.get(id) ?? true));
-  
-  const handleSubmit = () => {
-    if (allFilled) {
-      onComplete(tempFarmerIds);
-    }
-  };
+  const handleSubmit = () => { if (allFilled) onComplete(tempFarmerIds); };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-    >
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-gray-800 rounded-2xl border border-white/20 shadow-2xl w-full max-w-md mx-4 overflow-hidden"
-      >
-        {/* Header */}
-        <div className="flex items-center gap-3 p-4 border-b border-white/10 bg-emerald-500/10">
-          <div className="p-2 rounded-xl bg-emerald-500/20">
-            <User className="w-6 h-6 text-emerald-400" />
-          </div>
-          <h3 className="text-lg font-bold text-white">Enter Farmer IDs</h3>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+        className="bg-[#111827] rounded-2xl border border-white/[0.1] shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        <div className="flex items-center gap-3 p-4 border-b border-white/[0.06] bg-emerald-500/[0.04]">
+          <div className="p-2 rounded-xl bg-emerald-500/10"><User className="w-5 h-5 text-emerald-400" /></div>
+          <h3 className="text-base font-bold text-white">Enter Farmer IDs</h3>
         </div>
-
-        {/* Content */}
-        <div className="p-4 space-y-4 max-h-[60vh] overflow-auto">
+        <div className="p-4 space-y-3.5 max-h-[60vh] overflow-auto">
           {machineIds.map((machineId, index) => (
-            <div key={machineId} className="space-y-2">
-              <label className="text-sm font-semibold text-white/70">
-                Machine M-{formatMachineId(machineId)}
-              </label>
+            <div key={machineId} className="space-y-1.5">
+              <label className="text-xs font-semibold text-white/50">Machine M-{formatMachineId(machineId)}</label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-400" />
-                <input
-                  type="number"
-                  placeholder="Enter Farmer ID"
-                  autoFocus={index === 0}
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-400/60" />
+                <input type="number" placeholder="Enter Farmer ID" autoFocus={index === 0}
                   value={tempFarmerIds.get(machineId) || ''}
-                  onChange={(e) => {
-                    const newMap = new Map(tempFarmerIds);
-                    newMap.set(machineId, e.target.value);
-                    setTempFarmerIds(newMap);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && allFilled) {
-                      handleSubmit();
-                    }
-                  }}
-                  className="w-full pl-11 pr-4 py-3 bg-gray-700/50 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all"
-                />
+                  onChange={(e) => { const m = new Map(tempFarmerIds); m.set(machineId, e.target.value); setTempFarmerIds(m); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && allFilled) handleSubmit(); }}
+                  className="w-full pl-10 pr-4 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder-white/25 focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/30 outline-none transition-all text-sm" />
               </div>
             </div>
           ))}
         </div>
-
-        {/* Actions */}
-        <div className="flex gap-3 p-4 border-t border-white/10 bg-gray-900/50">
-          <button
-            onClick={onCancel}
-            className="flex-1 py-3 px-4 rounded-xl border border-white/20 text-white/70 hover:bg-white/5 transition-colors font-medium"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={!allFilled}
-            className={`flex-1 py-3 px-4 rounded-xl font-bold transition-all ${
-              allFilled
-                ? 'bg-emerald-500 text-white hover:bg-emerald-600'
-                : 'bg-gray-600 text-white/40 cursor-not-allowed'
-            }`}
-          >
+        <div className="flex gap-3 p-4 border-t border-white/[0.06]">
+          <button onClick={onCancel} className="flex-1 py-2.5 px-4 rounded-xl border border-white/[0.1] text-white/50 hover:bg-white/[0.04] transition-colors text-sm font-medium">Cancel</button>
+          <button onClick={handleSubmit} disabled={!allFilled}
+            className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-bold transition-all ${allFilled ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-white/[0.06] text-white/25 cursor-not-allowed'}`}>
             {hasManualWeight ? 'Next' : 'Start Test'}
           </button>
         </div>
@@ -1533,99 +1531,45 @@ function FarmerIdDialogComponent({
   );
 }
 
-// Weight Dialog Component
-function WeightDialogComponent({ 
-  machineIds, 
-  formatMachineId, 
-  onComplete, 
-  onCancel 
-}: { 
-  machineIds: string[]; 
-  formatMachineId: (id: string) => string; 
-  onComplete: (weights: Map<string, string>) => void; 
-  onCancel: () => void; 
+function WeightDialogComponent({
+  machineIds, formatMachineId, onComplete, onCancel
+}: {
+  machineIds: string[]; formatMachineId: (id: string) => string;
+  onComplete: (weights: Map<string, string>) => void; onCancel: () => void;
 }) {
   const [tempWeights, setTempWeights] = useState<Map<string, string>>(new Map());
-  
   const allFilled = machineIds.every(id => (tempWeights.get(id) || '').trim() !== '');
-  
-  const handleSubmit = () => {
-    if (allFilled) {
-      onComplete(tempWeights);
-    }
-  };
+  const handleSubmit = () => { if (allFilled) onComplete(tempWeights); };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-    >
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-gray-800 rounded-2xl border border-white/20 shadow-2xl w-full max-w-md mx-4 overflow-hidden"
-      >
-        {/* Header */}
-        <div className="flex items-center gap-3 p-4 border-b border-white/10 bg-cyan-500/10">
-          <div className="p-2 rounded-xl bg-cyan-500/20">
-            <Scale className="w-6 h-6 text-cyan-400" />
-          </div>
-          <h3 className="text-lg font-bold text-white">Enter Weights</h3>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+        className="bg-[#111827] rounded-2xl border border-white/[0.1] shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        <div className="flex items-center gap-3 p-4 border-b border-white/[0.06] bg-cyan-500/[0.04]">
+          <div className="p-2 rounded-xl bg-cyan-500/10"><Scale className="w-5 h-5 text-cyan-400" /></div>
+          <h3 className="text-base font-bold text-white">Enter Weights</h3>
         </div>
-
-        {/* Content */}
-        <div className="p-4 space-y-4 max-h-[60vh] overflow-auto">
+        <div className="p-4 space-y-3.5 max-h-[60vh] overflow-auto">
           {machineIds.map((machineId, index) => (
-            <div key={machineId} className="space-y-2">
-              <label className="text-sm font-semibold text-white/70">
-                Machine M-{formatMachineId(machineId)}
-              </label>
+            <div key={machineId} className="space-y-1.5">
+              <label className="text-xs font-semibold text-white/50">Machine M-{formatMachineId(machineId)}</label>
               <div className="relative">
-                <Scale className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-cyan-400" />
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="Enter Weight"
-                  autoFocus={index === 0}
+                <Scale className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-400/60" />
+                <input type="number" step="0.01" placeholder="Enter Weight" autoFocus={index === 0}
                   value={tempWeights.get(machineId) || ''}
-                  onChange={(e) => {
-                    const newMap = new Map(tempWeights);
-                    newMap.set(machineId, e.target.value);
-                    setTempWeights(newMap);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && allFilled) {
-                      handleSubmit();
-                    }
-                  }}
-                  className="w-full pl-11 pr-12 py-3 bg-gray-700/50 border border-white/10 rounded-xl text-white placeholder-white/40 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition-all"
-                />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-white/50 font-medium">kg</span>
+                  onChange={(e) => { const m = new Map(tempWeights); m.set(machineId, e.target.value); setTempWeights(m); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && allFilled) handleSubmit(); }}
+                  className="w-full pl-10 pr-12 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder-white/25 focus:border-cyan-500/40 focus:ring-1 focus:ring-cyan-500/30 outline-none transition-all text-sm" />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 text-xs font-medium">kg</span>
               </div>
             </div>
           ))}
         </div>
-
-        {/* Actions */}
-        <div className="flex gap-3 p-4 border-t border-white/10 bg-gray-900/50">
-          <button
-            onClick={onCancel}
-            className="flex-1 py-3 px-4 rounded-xl border border-white/20 text-white/70 hover:bg-white/5 transition-colors font-medium"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={!allFilled}
-            className={`flex-1 py-3 px-4 rounded-xl font-bold transition-all ${
-              allFilled
-                ? 'bg-cyan-500 text-white hover:bg-cyan-600'
-                : 'bg-gray-600 text-white/40 cursor-not-allowed'
-            }`}
-          >
+        <div className="flex gap-3 p-4 border-t border-white/[0.06]">
+          <button onClick={onCancel} className="flex-1 py-2.5 px-4 rounded-xl border border-white/[0.1] text-white/50 hover:bg-white/[0.04] transition-colors text-sm font-medium">Cancel</button>
+          <button onClick={handleSubmit} disabled={!allFilled}
+            className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-bold transition-all ${allFilled ? 'bg-cyan-500 text-white hover:bg-cyan-600' : 'bg-white/[0.06] text-white/25 cursor-not-allowed'}`}>
             Start Test
           </button>
         </div>
@@ -1634,18 +1578,11 @@ function WeightDialogComponent({
   );
 }
 
-// Settings Panel Component
-function SettingsPanelComponent({ 
-  connectedBLEMachines, 
-  machineWeighingScaleMode,
-  setMachineWeighingScaleMode,
-  machineFarmerIdMode,
-  setMachineFarmerIdMode,
-  selectedChannel,
-  setSelectedChannel,
-  formatMachineId,
-  onClose 
-}: { 
+function SettingsPanelComponent({
+  connectedBLEMachines, machineWeighingScaleMode, setMachineWeighingScaleMode,
+  machineFarmerIdMode, setMachineFarmerIdMode, selectedChannel, setSelectedChannel,
+  formatMachineId, onClose
+}: {
   connectedBLEMachines: Set<string>;
   machineWeighingScaleMode: Map<string, boolean>;
   setMachineWeighingScaleMode: (map: Map<string, boolean>) => void;
@@ -1657,133 +1594,51 @@ function SettingsPanelComponent({
   onClose: () => void;
 }) {
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="bg-gray-800 rounded-2xl border border-white/20 shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-white/10 bg-purple-500/10">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <motion.div initial={{ scale: 0.95, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 10 }}
+        className="bg-[#111827] rounded-2xl border border-white/[0.1] shadow-2xl w-full max-w-lg mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-white/[0.06] bg-violet-500/[0.04]">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-purple-500/20">
-              <Settings className="w-6 h-6 text-purple-400" />
-            </div>
-            <h3 className="text-lg font-bold text-white">Test Settings</h3>
+            <div className="p-2 rounded-xl bg-violet-500/10"><Settings className="w-5 h-5 text-violet-400" /></div>
+            <h3 className="text-base font-bold text-white">Test Settings</h3>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-white/10 rounded-xl transition-colors"
-          >
-            <X className="w-5 h-5 text-white/60" />
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/[0.06] transition-colors">
+            <X className="w-4 h-4 text-white/40" />
           </button>
         </div>
-
-        {/* Content */}
-        <div className="p-4 space-y-4 max-h-[60vh] overflow-auto">
-          {/* Per-Machine Settings */}
+        <div className="p-4 space-y-3 max-h-[60vh] overflow-auto">
           {Array.from(connectedBLEMachines).map((machineId) => (
-            <div key={machineId} className="bg-gray-900/50 rounded-xl p-4 space-y-3">
+            <div key={machineId} className="bg-white/[0.03] rounded-xl p-3.5 space-y-3">
               <div className="flex items-center gap-2">
-                <Bluetooth className="w-4 h-4 text-emerald-400" />
-                <span className="font-bold text-white">Machine M-{formatMachineId(machineId)}</span>
+                <Bluetooth className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-sm font-bold text-white/80">Machine M-{formatMachineId(machineId)}</span>
               </div>
-
               {/* Weighing Scale Mode */}
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm text-white/70">
-                  <Scale className="w-4 h-4" />
-                  <span>Weighing Scale:</span>
-                </div>
+                <div className="flex items-center gap-2 text-xs text-white/50"><Scale className="w-3.5 h-3.5" /><span>Weighing Scale</span></div>
                 <div className="flex gap-1">
-                  <button
-                    onClick={() => {
-                      const newMap = new Map(machineWeighingScaleMode);
-                      newMap.set(machineId, true);
-                      setMachineWeighingScaleMode(newMap);
-                    }}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                      machineWeighingScaleMode.get(machineId) ?? true
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                        : 'bg-gray-700/50 text-white/50 hover:bg-gray-700'
-                    }`}
-                  >
-                    Auto
-                  </button>
-                  <button
-                    onClick={() => {
-                      const newMap = new Map(machineWeighingScaleMode);
-                      newMap.set(machineId, false);
-                      setMachineWeighingScaleMode(newMap);
-                    }}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                      !(machineWeighingScaleMode.get(machineId) ?? true)
-                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                        : 'bg-gray-700/50 text-white/50 hover:bg-gray-700'
-                    }`}
-                  >
-                    Manual
-                  </button>
+                  <button onClick={() => { const m = new Map(machineWeighingScaleMode); m.set(machineId, true); setMachineWeighingScaleMode(m); }}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${(machineWeighingScaleMode.get(machineId) ?? true) ? 'bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30' : 'bg-white/[0.04] text-white/40 hover:bg-white/[0.06]'}`}>Auto</button>
+                  <button onClick={() => { const m = new Map(machineWeighingScaleMode); m.set(machineId, false); setMachineWeighingScaleMode(m); }}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${!(machineWeighingScaleMode.get(machineId) ?? true) ? 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/30' : 'bg-white/[0.04] text-white/40 hover:bg-white/[0.06]'}`}>Manual</button>
                 </div>
               </div>
-
               {/* Farmer ID Mode */}
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm text-white/70">
-                  <User className="w-4 h-4" />
-                  <span>Farmer ID:</span>
-                </div>
+                <div className="flex items-center gap-2 text-xs text-white/50"><User className="w-3.5 h-3.5" /><span>Farmer ID</span></div>
                 <div className="flex gap-1">
-                  <button
-                    onClick={() => {
-                      const newMap = new Map(machineFarmerIdMode);
-                      newMap.set(machineId, true);
-                      setMachineFarmerIdMode(newMap);
-                    }}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                      machineFarmerIdMode.get(machineId) ?? false
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                        : 'bg-gray-700/50 text-white/50 hover:bg-gray-700'
-                    }`}
-                  >
-                    Auto
-                  </button>
-                  <button
-                    onClick={() => {
-                      const newMap = new Map(machineFarmerIdMode);
-                      newMap.set(machineId, false);
-                      setMachineFarmerIdMode(newMap);
-                    }}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                      !(machineFarmerIdMode.get(machineId) ?? false)
-                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                        : 'bg-gray-700/50 text-white/50 hover:bg-gray-700'
-                    }`}
-                  >
-                    Manual
-                  </button>
+                  <button onClick={() => { const m = new Map(machineFarmerIdMode); m.set(machineId, true); setMachineFarmerIdMode(m); }}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${(machineFarmerIdMode.get(machineId) ?? false) ? 'bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30' : 'bg-white/[0.04] text-white/40 hover:bg-white/[0.06]'}`}>Auto</button>
+                  <button onClick={() => { const m = new Map(machineFarmerIdMode); m.set(machineId, false); setMachineFarmerIdMode(m); }}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${!(machineFarmerIdMode.get(machineId) ?? false) ? 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/30' : 'bg-white/[0.04] text-white/40 hover:bg-white/[0.06]'}`}>Manual</button>
                 </div>
               </div>
             </div>
           ))}
         </div>
-
-        {/* Actions */}
-        <div className="p-4 border-t border-white/10 bg-gray-900/50">
-          <button
-            onClick={onClose}
-            className="w-full py-3 px-4 rounded-xl bg-emerald-500 text-white font-bold hover:bg-emerald-600 transition-all"
-          >
-            Done
-          </button>
+        <div className="p-4 border-t border-white/[0.06]">
+          <button onClick={onClose} className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 transition-all">Done</button>
         </div>
       </motion.div>
     </motion.div>
