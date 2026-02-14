@@ -101,10 +101,10 @@ export default function APIManagementPage() {
   };
 
   const updateMachineId = (modelId: string, machineIndex: number, value: string) => {
-    // Validate format: Must start with exactly one letter
+    // Validate format: Alphanumeric only (letter prefix is optional)
     const upperValue = value.toUpperCase();
-    if (upperValue && !/^[A-Z][0-9A-Z]*$/.test(upperValue)) {
-      alert('Machine ID must start with exactly one letter (A-Z) followed by numbers/letters.\nExample: M001, A123, B456');
+    if (upperValue && !/^[A-Z0-9]+$/.test(upperValue)) {
+      alert('Machine ID must contain only letters and numbers.\nExample: M001, 001, A123, 456');
       return;
     }
     
